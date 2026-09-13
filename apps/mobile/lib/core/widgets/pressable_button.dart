@@ -43,10 +43,10 @@ class _PressableButtonState extends State<PressableButton> {
         duration: const Duration(milliseconds: 100),
         child: Container(
           width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 14),
+          padding: const EdgeInsets.symmetric(vertical: 16),
           decoration: BoxDecoration(
             color: enabled ? colors.primary : colors.primary.withValues(alpha: 0.4),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(14),
           ),
           alignment: Alignment.center,
           child: widget.loading

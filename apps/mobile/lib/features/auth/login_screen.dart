@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../core/auth_state.dart';
+import '../../core/theme/app_theme.dart';
 import '../../core/widgets/pressable_button.dart';
 import 'auth_repository.dart';
 
@@ -45,26 +46,41 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppColors.background,
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
+          padding: const EdgeInsets.symmetric(horizontal: 28),
           child: Form(
             key: _formKey,
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text('Event Hub', style: Theme.of(context).textTheme.displayLarge),
+                Container(
+                  width: 52,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    color: AppColors.accent,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  alignment: Alignment.center,
+                  child: const Icon(Icons.confirmation_number_rounded, color: Colors.white, size: 26),
+                ),
+                const SizedBox(height: 24),
+                Text('Bienvenido de vuelta', style: Theme.of(context).textTheme.displayLarge),
                 const SizedBox(height: 8),
-                Text('Inicia sesión para comprar boletos', style: Theme.of(context).textTheme.bodyLarge),
-                const SizedBox(height: 32),
+                Text(
+                  'Inicia sesión para comprar boletos',
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: AppColors.inkSoft),
+                ),
+                const SizedBox(height: 36),
                 TextFormField(
                   controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
                   decoration: const InputDecoration(labelText: 'Email'),
                   validator: (v) => (v == null || !v.contains('@')) ? 'Email inválido' : null,
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 14),
                 TextFormField(
                   controller: _passwordController,
                   obscureText: true,
@@ -72,8 +88,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   validator: (v) => (v == null || v.length < 8) ? 'Mínimo 8 caracteres' : null,
                 ),
                 if (_error != null) ...[
-                  const SizedBox(height: 16),
-                  Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                  const SizedBox(height: 14),
+                  Text(_error!, style: const TextStyle(color: AppColors.error)),
                 ],
                 const SizedBox(height: 24),
                 PressableButton(
@@ -81,7 +97,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   loading: _loading,
                   child: const Text('Ingresar'),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
                 TextButton(
                   onPressed: () => context.go('/register'),
                   child: const Text('¿No tienes cuenta? Regístrate'),
