@@ -1,0 +1,53 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Read-model local, sincronizado desde events-service vía el evento
+/// event.created (primer consumidor real, ver ZonesSyncConsumer). No hay FK
+/// cross-servicio — cada servicio es dueño de su propia copia de los datos
+/// que necesita.
+model EventZone {
+  id        String   @id // mismo id que la zona en events-service
+  eventId   String
+  name      String
+  price     Decimal  @db.Decimal(10, 2)
+  capacity  Int
+  syncedAt  DateTime @default(now())
+
+  @@map("event_zones")
+}
+
+/// El boleto confirmado — la fuente de verdad contra sobreventa es el COUNT
+/// de esta tabla dentro de una transacción con lock de fila sobre EventZone
+/// (ver TicketsService.confirmFromOrder). La reserva en Redis es un "soft
+/// hold" para UX rápida, no la garantía dura (premisa 6 de DESIGN.md).
+model Ticket {
+  id            String   @id @default(uuid())
+  zoneId        String
+  userId        String
+  orderId       String
+  reservationId String
+  qrToken       String   @unique
+  createdAt     DateTime @default(now())
+
+  @@index([zoneId])
+  @@index([userId])
+  @@map("tickets")
+}
+
+/// Contrato de idempotencia (premisa 7): antes de procesar un evento
+/// consumido, verificar que su eventId no esté aquí; después de procesarlo
+/// con éxito, insertarlo en la MISMA transacción que el efecto de negocio.
+model ProcessedEvent {
+  eventId     String   @id
+  eventType   String
+  processedAt DateTime @default(now())
+
+  @@map("processed_events")
+}

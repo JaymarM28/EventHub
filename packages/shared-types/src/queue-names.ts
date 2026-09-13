@@ -22,3 +22,7 @@ export function queueFor(consumerService: string): string {
 export function deadLetterQueueFor(consumerService: string): string {
   return `${queueFor(consumerService)}.dlq`;
 }
+
+export function deadLetterExchangeFor(consumerService: string): string {
+  return `${queueFor(consumerService)}.dlx`;
+}

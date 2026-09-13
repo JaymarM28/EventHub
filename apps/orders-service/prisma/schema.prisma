@@ -1,0 +1,46 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  FAILED
+}
+
+model Order {
+  id            String      @id @default(uuid())
+  userId        String
+  zoneId        String
+  reservationId String
+  amount        Decimal     @db.Decimal(10, 2)
+  status        OrderStatus @default(PENDING)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@map("orders")
+}
+
+/// Patrón transactional outbox (premisa 8 de DESIGN.md): la confirmación
+/// del pago y esta fila se escriben en la MISMA transacción de Postgres.
+/// Un poller aparte (OutboxPublisherService) las lee y publica a RabbitMQ
+/// con reintento/backoff — así un fallo de RabbitMQ justo después del pago
+/// nunca pierde el evento silenciosamente.
+model OutboxEvent {
+  id          String    @id // == eventId del EventEnvelope
+  type        String
+  payload     Json
+  createdAt   DateTime  @default(now())
+  publishedAt DateTime?
+  attempts    Int       @default(0)
+  lastError   String?
+
+  @@index([publishedAt])
+  @@map("outbox_events")
+}

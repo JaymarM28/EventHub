@@ -26,9 +26,19 @@ export function buildRoutes(): ServiceRoute[] {
   const authServiceUrl = process.env.AUTH_SERVICE_URL ?? 'http://localhost:3001';
   const eventsServiceUrl =
     process.env.EVENTS_SERVICE_URL ?? 'http://localhost:3002';
+  const ticketsServiceUrl =
+    process.env.TICKETS_SERVICE_URL ?? 'http://localhost:3003';
+  const ordersServiceUrl =
+    process.env.ORDERS_SERVICE_URL ?? 'http://localhost:3004';
 
   return [
     { pathPrefix: '/auth', target: authServiceUrl, authMode: 'public' },
     { pathPrefix: '/events', target: eventsServiceUrl, authMode: 'optional' },
+    // Nota: POST /reservations de tickets-service NO se expone aquí a
+    // propósito — es una llamada interna orders-service → tickets-service
+    // (Finding 1), exponerla dejaría a un cliente reservar cupo sin pasar
+    // por checkout/pago.
+    { pathPrefix: '/tickets', target: ticketsServiceUrl, authMode: 'required' },
+    { pathPrefix: '/orders', target: ordersServiceUrl, authMode: 'required' },
   ];
 }

@@ -52,7 +52,17 @@ cd apps/events-service
 pnpm prisma:migrate
 pnpm start:dev
 
-# Terminal 3 — api-gateway (puerto 3010, único servicio pensado para exponerse)
+# Terminal 3 — tickets-service (puerto 3003, HTTP + consumidor RMQ)
+cd apps/tickets-service
+pnpm prisma:migrate
+pnpm start:dev
+
+# Terminal 4 — orders-service (puerto 3004, checkout + poller del outbox)
+cd apps/orders-service
+pnpm prisma:migrate
+pnpm start:dev
+
+# Terminal 5 — api-gateway (puerto 3010, único servicio pensado para exponerse)
 cd apps/api-gateway
 pnpm start:dev
 ```
@@ -66,8 +76,9 @@ curl -X POST http://localhost:3010/auth/register \
 ```
 
 `JWT_SECRET` e `INTERNAL_AUTH_SECRET` deben ser idénticos entre
-`auth-service` y `api-gateway` (y, a futuro, todos los servicios internos)
-— ver los comentarios en cada `.env.example`.
+`auth-service`, `api-gateway` y todos los servicios internos — ver los
+comentarios en cada `.env.example`. `TICKET_QR_SECRET` debe ser idéntico
+entre `tickets-service` y (a futuro) `access-service`.
 
 ## Gotchas del monorepo
 
@@ -76,9 +87,22 @@ curl -X POST http://localhost:3010/auth/register \
 `output` propio por servicio, el último `prisma generate` que corras (de
 CUALQUIER servicio) sobrescribe el cliente generado de los demás, y los
 otros servicios truenan en runtime con `Cannot read properties of
-undefined (reading 'findUnique')`. Ya configurado en `auth-service` y
-`events-service` (`output = "../generated/prisma-client"`) — replicar en
-cada servicio nuevo que use Prisma.
+undefined (reading 'findUnique')`. Ya configurado en `auth-service`,
+`events-service`, `tickets-service` y `orders-service`
+(`output = "../generated/prisma-client"`) — replicar en cada servicio
+nuevo que use Prisma.
+
+**`ConfigService.get<T>()` no convierte tipos en runtime.** Un valor de
+`.env` siempre llega como string — pedir `get<number>('X', 10)` no lo
+parsea, solo miente a TypeScript sobre el tipo. Vimos esto romper en vivo
+(`Prisma` rechazando un filtro `lt` con un string). Parsear siempre con
+`Number(...)` explícito.
+
+**Errores 4xx/5xx entre servicios no se traducen solos.** Una llamada
+síncrona vía `@nestjs/axios` que recibe un 409 del servicio destino llega
+como `AxiosError` crudo — el exception filter de Nest lo convierte en 500
+si no se traduce explícitamente a `HttpException` con el status/mensaje
+originales (ver `tickets-client.service.ts`).
 
 ## Estructura
 
