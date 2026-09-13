@@ -158,9 +158,12 @@ Flutter app                api-gateway        orders-svc        tickets-svc     
   implementados en esta fase — su caso de uso (venta en taquilla presencial, punto
   de venta de comida/bebida) queda como candidato a fase stretch junto con
   reembolsos y admin panel, no bloquea el flujo end-to-end principal.
-- Estrategia de revocación de JWT: tokens de vida corta + refresh token, o lista de
-  revocación en Redis para revocar acceso inmediato si cambia el rol de un usuario
-  — decidir antes de implementar auth-service (paso 2).
+- ~~Estrategia de revocación de JWT~~ — **Resuelta al implementar auth-service
+  (paso 2):** access token de vida corta (15 min, validado solo por firma) +
+  refresh token hasheado en Postgres, rotado en cada uso; reusar un refresh
+  token ya rotado revoca toda la sesión del usuario (señal de robo). Un cambio
+  de rol tarda hasta 15 min en propagarse (vida del access token) — aceptado
+  como trade-off razonable.
 - Manejo de cancelación de eventos y reembolsos (`event.cancelled`, `order.refunded`)
   no está en el roadmap actual — confirmar si entra en el alcance inicial o se
   pospone (afecta tickets, orders y notifications simultáneamente si se agrega).

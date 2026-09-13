@@ -1,0 +1,47 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Debe mantenerse en sync con UserRole en packages/internal-auth/src/internal-auth.types.ts
+enum Role {
+  SUPER_ADMIN
+  ORGANIZER
+  STAFF
+  VENDOR
+  ATTENDEE
+}
+
+model User {
+  id           String         @id @default(uuid())
+  email        String         @unique
+  passwordHash String
+  roles        Role[]         @default([ATTENDEE])
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+// Guarda el HASH del refresh token, nunca el valor en claro (si la DB se
+// filtra, los refresh tokens no quedan expuestos). Rotado en cada uso
+// (revocationDecision A del eng review): al refrescar, este registro se
+// marca revoked y se crea uno nuevo — reusar un refresh token ya usado
+// es señal de robo y revoca toda la familia del usuario.
+model RefreshToken {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
