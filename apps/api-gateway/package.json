@@ -1,0 +1,50 @@
+{
+  "name": "@event-hub/api-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Único servicio expuesto al exterior. Valida el JWT una vez, firma el header interno (@event-hub/internal-auth) y hace proxy hacia los microservicios internos.",
+  "scripts": {
+    "build": "nest build",
+    "start": "nest start",
+    "start:dev": "dotenv -e .env -- nest start --watch",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:cov": "jest --coverage"
+  },
+  "dependencies": {
+    "@event-hub/internal-auth": "workspace:*",
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/config": "^4.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/platform-express": "^11.0.0",
+    "http-proxy-middleware": "^3.0.3",
+    "jsonwebtoken": "^9.0.2",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.0",
+    "@nestjs/testing": "^11.0.0",
+    "@types/express": "^5.0.0",
+    "@types/jest": "^29.5.14",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/node": "^22.10.0",
+    "dotenv-cli": "^8.0.0",
+    "jest": "^29.7.0",
+    "source-map-support": "^0.5.21",
+    "ts-jest": "^29.2.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.0"
+  },
+  "jest": {
+    "moduleFileExtensions": ["js", "json", "ts"],
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$",
+    "transform": {
+      "^.+\\.ts$": "ts-jest"
+    },
+    "collectCoverageFrom": ["**/*.(t|j)s"],
+    "coverageDirectory": "../coverage",
+    "testEnvironment": "node"
+  }
+}
