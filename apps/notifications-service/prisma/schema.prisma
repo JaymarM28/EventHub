@@ -1,0 +1,39 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum NotificationChannel {
+  EMAIL
+  PUSH
+}
+
+/// El "envío" está simulado (mismo criterio que el pago en orders-service):
+/// no hay proveedor SMTP/push real conectado todavía — esta tabla ES el
+/// registro de lo que se habría enviado, útil para verificar el flujo y
+/// para que el Flutter app (paso 9) muestre un historial de notificaciones.
+model Notification {
+  id        String              @id @default(uuid())
+  userId    String
+  channel   NotificationChannel @default(EMAIL)
+  subject   String
+  body      String
+  createdAt DateTime            @default(now())
+
+  @@index([userId])
+  @@map("notifications")
+}
+
+/// Contrato de idempotencia (premisa 7) — mismo patrón que tickets-service.
+model ProcessedEvent {
+  eventId     String   @id
+  eventType   String
+  processedAt DateTime @default(now())
+
+  @@map("processed_events")
+}

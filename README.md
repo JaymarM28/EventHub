@@ -29,7 +29,8 @@ pnpm dev:infra:down     # apagar
 
 - RabbitMQ management UI: http://localhost:15674 (user/pass en `.env`)
 - Postgres: `localhost:5434`, bases separadas `auth_db`, `events_db`,
-  `tickets_db`, `orders_db` (ver `infra/postgres/init-multiple-databases.sh`)
+  `tickets_db`, `orders_db`, `notifications_db` (ver
+  `infra/postgres/init-multiple-databases.sh`)
 - Redis: `localhost:6381`
 
 > Puertos no estándar (5434/5674/15674/6381 en vez de 5432/5672/15672/6379):
@@ -62,7 +63,12 @@ cd apps/orders-service
 pnpm prisma:migrate
 pnpm start:dev
 
-# Terminal 5 — api-gateway (puerto 3010, único servicio pensado para exponerse)
+# Terminal 5 — notifications-service (puerto 3005, HTTP + consumidor RMQ)
+cd apps/notifications-service
+pnpm prisma:migrate
+pnpm start:dev
+
+# Terminal 6 — api-gateway (puerto 3010, único servicio pensado para exponerse)
 cd apps/api-gateway
 pnpm start:dev
 ```

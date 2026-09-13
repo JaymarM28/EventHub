@@ -30,6 +30,8 @@ export function buildRoutes(): ServiceRoute[] {
     process.env.TICKETS_SERVICE_URL ?? 'http://localhost:3003';
   const ordersServiceUrl =
     process.env.ORDERS_SERVICE_URL ?? 'http://localhost:3004';
+  const notificationsServiceUrl =
+    process.env.NOTIFICATIONS_SERVICE_URL ?? 'http://localhost:3005';
 
   return [
     { pathPrefix: '/auth', target: authServiceUrl, authMode: 'public' },
@@ -40,5 +42,6 @@ export function buildRoutes(): ServiceRoute[] {
     // por checkout/pago.
     { pathPrefix: '/tickets', target: ticketsServiceUrl, authMode: 'required' },
     { pathPrefix: '/orders', target: ordersServiceUrl, authMode: 'required' },
+    { pathPrefix: '/notifications', target: notificationsServiceUrl, authMode: 'required' },
   ];
 }
