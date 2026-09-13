@@ -107,6 +107,32 @@ curl -X POST http://localhost:3010/auth/register \
 comentarios en cada `.env.example`. `TICKET_QR_SECRET` debe ser idéntico
 entre `tickets-service` y (a futuro) `access-service`.
 
+## App Flutter (`apps/mobile`)
+
+```bash
+cd apps/mobile
+flutter pub get
+flutter run -d <device-id>   # flutter devices para listar
+flutter test
+```
+
+- Usa `dio` (interceptor: adjunta JWT, refresca una vez ante 401),
+  `go_router` (redirect consciente de sesión), `flutter_secure_storage`
+  (tokens en Keychain/Keystore, nunca en texto plano) y `provider`.
+- El emulador de Android no resuelve `localhost` como el host — la app usa
+  `10.0.2.2` automáticamente ahí (ver `lib/core/config.dart`); el
+  simulador de iOS sí comparte red con el host.
+
+**Limitación conocida: `mobile_scanner` (QR, paso 9c) no compila para el
+simulador de iOS en Mac Apple Silicon.** Los pods de Google MLKit no traen
+slice arm64 para simulador, solo para dispositivo real — un problema
+conocido del ecosistema, no un bug de esta app. Mitigado parcialmente con
+`EXCLUDED_ARCHS[sdk=iphonesimulator*] = arm64` en el `Podfile` y en
+`Runner.xcodeproj` (fuerza x86_64 vía Rosetta), pero seguía fallando el
+link al momento de escribir esto — **probar la app completa en Android
+emulator o en un iPhone físico**; iOS simulator solo sirve para pantallas
+que no toquen `mobile_scanner` una vez este ajuste esté resuelto del todo.
+
 ## Gotchas del monorepo
 
 **Cada schema.prisma DEBE declarar su propio `output`.** pnpm dedupea
@@ -155,6 +181,7 @@ Ver el detalle completo en `DESIGN.md` — resumen de los primeros pasos:
 6. notifications-service.
 7. access-service.
 8. Checkpoint end-to-end con curl/Postman.
-9. Flutter app (9a auth/eventos, 9b checkout, 9c escaneo QR).
+9. Flutter app: 9a ✅ auth/eventos (probado en Android emulator contra el
+   backend real). 9b checkout, 9c escaneo QR — pendientes.
 
 Fase opcional/stretch: admin panel web, ai-service, Kubernetes, reembolsos.

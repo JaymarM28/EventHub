@@ -93,3 +93,34 @@ gateway).
 **Depends on:** Diseñar el flujo de asignación de roles (fuera de alcance
 actual, candidato a fase stretch junto con VENDOR/STAFF operativos).
 
+---
+
+## 5. `mobile_scanner` no compila para simulador de iOS en Apple Silicon
+
+**What:** El paso 9c (escaneo de QR) depende de `mobile_scanner`, que a su
+vez depende de Google MLKit. Los pods de MLKit no traen slice arm64 para
+simulador — solo dispositivo real — así que compilar la app Flutter para
+el simulador de iOS en un Mac Apple Silicon falla al linkear.
+
+**Why:** Limitación conocida del ecosistema (MLKit + CocoaPods + Apple
+Silicon), no un bug propio. Se intentó el workaround estándar
+(`EXCLUDED_ARCHS[sdk=iphonesimulator*] = arm64` en Podfile y en
+`Runner.xcodeproj` para forzar x86_64 vía Rosetta) pero seguía fallando el
+link a `flutter_secure_storage` al momento de escribir esto — no se
+investigó más a fondo para no bloquear el paso 9a (verificado en Android
+emulator en su lugar, sin este problema).
+
+**Pros:** Resolver esto permite testear TODO el flujo (incluido escaneo)
+en simulador, más rápido de iterar que un dispositivo físico.
+
+**Cons:** Es una guerra conocida de CocoaPods/Xcode — puede consumir horas
+sin garantía de que el fix final sea limpio; puede que la respuesta
+correcta sea simplemente "iOS: solo dispositivo real para 9c".
+
+**Context:** Alternativas a evaluar cuando se llegue al paso 9c: (a)
+terminar de depurar la exclusión de arquitectura, (b) probar en un iPhone
+físico conectado, (c) evaluar un paquete de escaneo de QR alternativo sin
+dependencia de MLKit (ej. basado en ZXing puro) si el problema persiste.
+
+**Depends on:** Paso 9c (escaneo de QR) del roadmap.
+
