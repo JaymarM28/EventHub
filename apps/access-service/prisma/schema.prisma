@@ -1,0 +1,33 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ScanResult {
+  VALID
+  ALREADY_USED
+  INVALID
+  DEGRADED
+}
+
+/// Auditoría de cada intento de escaneo, válido o no (DESIGN.md paso 7:
+/// "control de duplicados/fraude básico"). tickets-service es la fuente de
+/// verdad sobre si un boleto fue usado (scannedAt) — este log es solo para
+/// visibilidad/auditoría del lado de la puerta, no una segunda fuente de
+/// verdad que pueda desincronizarse.
+model ScanLog {
+  id         String     @id @default(uuid())
+  ticketId   String?
+  result     ScanResult
+  reason     String?
+  scannedBy  String
+  createdAt  DateTime   @default(now())
+
+  @@index([ticketId])
+  @@map("scan_logs")
+}

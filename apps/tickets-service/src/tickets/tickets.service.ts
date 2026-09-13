@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { signTicketToken } from '@event-hub/shared-types';
@@ -107,5 +107,40 @@ export class TicketsService {
 
   findByUser(userId: string) {
     return this.prisma.ticket.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
+  }
+
+  /**
+   * Validación de acceso (paso 7, access-service): marca el boleto como
+   * usado de forma ATÓMICA — el `updateMany` con `scannedAt: null` en el
+   * where hace que solo UNA de dos peticiones concurrentes (dos molinetes
+   * escaneando el mismo QR al mismo tiempo) pueda ganar. La otra ve
+   * `count: 0` y sabe que llegó tarde, sin necesitar un lock explícito.
+   */
+  async validateScan(ticketId: string): Promise<
+    | { valid: true; ticket: { id: string; zoneId: string; userId: string } }
+    | { valid: false; reason: string; scannedAt: Date }
+  > {
+    const result = await this.prisma.ticket.updateMany({
+      where: { id: ticketId, scannedAt: null },
+      data: { scannedAt: new Date() },
+    });
+
+    if (result.count === 1) {
+      const ticket = await this.prisma.ticket.findUniqueOrThrow({ where: { id: ticketId } });
+      return {
+        valid: true,
+        ticket: { id: ticket.id, zoneId: ticket.zoneId, userId: ticket.userId },
+      };
+    }
+
+    const ticket = await this.prisma.ticket.findUnique({ where: { id: ticketId } });
+    if (!ticket) {
+      throw new NotFoundException(`Boleto ${ticketId} no existe`);
+    }
+    return {
+      valid: false,
+      reason: 'Este boleto ya fue usado',
+      scannedAt: ticket.scannedAt!,
+    };
   }
 }

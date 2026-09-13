@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-eventhub}
       # Bases separadas por servicio (database-per-service, un solo contenedor
       # para simplificar el aprendizaje — cada NestJS service usa la suya).
-      POSTGRES_MULTIPLE_DATABASES: auth_db,events_db,tickets_db,orders_db,notifications_db
+      POSTGRES_MULTIPLE_DATABASES: auth_db,events_db,tickets_db,orders_db,notifications_db,access_db
     ports:
       - "${POSTGRES_PORT:-5433}:5432"
     volumes:

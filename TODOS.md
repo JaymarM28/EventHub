@@ -48,24 +48,48 @@ evento).
 
 ---
 
-## 3. Comportamiento de access-service ante timeout de tickets-service durante escaneo en vivo
+## 3. ~~Comportamiento de access-service ante timeout de tickets-service~~ — RESUELTO (paso 7)
 
-**What:** Definir qué hace access-service (y qué ve el staff en el dispositivo) si
-la consulta síncrona a tickets-service falla o expira durante un escaneo de QR.
+**Resuelto al implementar access-service:** ni "permitir con advertencia" ni
+"denegar por defecto" — un tercer estado explícito `DEGRADED`, distinto de
+`VALID`/`ALREADY_USED`/`INVALID`. Cada intento (incluidos los degradados) se
+audita en `ScanLog` con quién escaneó y cuándo. La decisión de qué hacer
+físicamente en la puerta ante un `DEGRADED` (dejar pasar con advertencia vs.
+pedir verificación manual) queda para la UI de Flutter (paso 9) — el backend
+ya no falla en silencio ni devuelve un 500 genérico, que era el riesgo real.
 
-**Why:** Sin esto, el staff en la puerta de un evento real podría quedarse sin saber
-si un boleto es válido — falla silenciosa en el peor momento posible (evento en vivo,
-fila de gente esperando).
+**Verificado en vivo:** con `tickets-service` apagado a mitad del flujo, el
+escaneo devolvió `DEGRADED` con mensaje claro, y quedó registrado en
+`scan_logs` igual que cualquier otro intento.
 
-**Pros:** UX crítica para el caso de uso real de control de acceso.
+---
 
-**Cons:** Ninguno real — es una decisión de diseño necesaria, no opcional.
+## 4. Seguridad: rol STAFF no aplicado en access-service ni en las mutaciones de tickets-service
 
-**Context:** Dos modos degradados típicos: (a) permitir el acceso con advertencia
-visual + registrar para auditoría posterior, o (b) denegar por defecto hasta que la
-conexión se restablezca. Es una decisión de producto (tolerancia a fraude vs.
-tolerancia a fricción en la entrada), no solo técnica — decidir con el caso de uso
-real en mente (ej. evento gratuito de bajo riesgo vs. concierto de alto valor).
+**What:** `POST /access/scan` y `POST /internal/tickets/:id/validate` (y
+`POST /events`, `PATCH /events/:id`) no filtran por rol STAFF/ORGANIZER a
+nivel de `@Roles(...)` de forma completa — actualmente cualquier usuario
+autenticado puede escanear boletos ajenos.
 
-**Depends on:** Paso 7 (access-service) del roadmap.
+**Why:** Los roles VENDOR/STAFF están reservados en el modelo de datos desde
+`auth-service` (paso 2) pero nunca se activó su enforcement — la premisa
+original que los dejó "reservados, no implementados" (Open Questions de
+DESIGN.md) sigue vigente y no se cerró en el paso 7.
+
+**Pros:** Cierra un gap de autorización real antes de exponer esto a
+usuarios reales.
+
+**Cons:** Requiere decidir el flujo de asignación de rol STAFF (¿quién
+promueve a alguien a STAFF? ¿el organizer del evento, un admin?) — es más
+que un simple `@Roles('STAFF')`.
+
+**Context:** Relacionado con el TODO de roles VENDOR/STAFF ya documentado en
+el design doc original. Al resolver este TODO, aplicar `@Roles('STAFF',
+'SUPER_ADMIN')` en `ScansController.scan` y considerar mover la validación
+interna de tickets a requerir un rol también (hoy cualquier internal
+context autenticado puede llamarla, mitigado solo por no estar expuesta vía
+gateway).
+
+**Depends on:** Diseñar el flujo de asignación de roles (fuera de alcance
+actual, candidato a fase stretch junto con VENDOR/STAFF operativos).
 

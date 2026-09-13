@@ -28,13 +28,17 @@ model EventZone {
 /// (ver TicketsService.confirmFromOrder). La reserva en Redis es un "soft
 /// hold" para UX rápida, no la garantía dura (premisa 6 de DESIGN.md).
 model Ticket {
-  id            String   @id @default(uuid())
+  id            String    @id @default(uuid())
   zoneId        String
   userId        String
   orderId       String
   reservationId String
-  qrToken       String   @unique
-  createdAt     DateTime @default(now())
+  qrToken       String    @unique
+  createdAt     DateTime  @default(now())
+  /// null = sin usar. Se marca de forma atómica (updateMany con
+  /// `scannedAt: null` en el where) al validar en la puerta — evita que dos
+  /// escaneos concurrentes del mismo boleto pasen ambos (paso 7).
+  scannedAt     DateTime?
 
   @@index([zoneId])
   @@index([userId])

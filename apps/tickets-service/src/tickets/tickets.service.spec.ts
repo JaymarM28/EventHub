@@ -1,5 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { NotFoundException } from '@nestjs/common';
 import { TicketsService } from './tickets.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
@@ -10,6 +11,11 @@ describe('TicketsService', () => {
   let prisma: {
     processedEvent: { findUnique: jest.Mock; create: jest.Mock };
     $transaction: jest.Mock;
+    ticket: {
+      updateMany: jest.Mock;
+      findUnique: jest.Mock;
+      findUniqueOrThrow: jest.Mock;
+    };
   };
   let tx: {
     $queryRaw: jest.Mock;
@@ -35,6 +41,11 @@ describe('TicketsService', () => {
     prisma = {
       processedEvent: { findUnique: jest.fn(), create: jest.fn() },
       $transaction: jest.fn(async (cb) => cb(tx)),
+      ticket: {
+        updateMany: jest.fn(),
+        findUnique: jest.fn(),
+        findUniqueOrThrow: jest.fn(),
+      },
     };
     redis = { release: jest.fn().mockResolvedValue(undefined) };
     publisher = { publish: jest.fn().mockResolvedValue(undefined) };
@@ -111,5 +122,53 @@ describe('TicketsService', () => {
     );
     expect(tx.ticket.create).not.toHaveBeenCalled();
     expect(publisher.publish).not.toHaveBeenCalled();
+  });
+
+  describe('validateScan', () => {
+    it('marca el boleto como usado y devuelve valid:true en el primer escaneo', async () => {
+      prisma.ticket.updateMany.mockResolvedValue({ count: 1 });
+      prisma.ticket.findUniqueOrThrow.mockResolvedValue({
+        id: 'ticket-1',
+        zoneId: 'zone-1',
+        userId: 'user-1',
+      });
+
+      const result = await service.validateScan('ticket-1');
+
+      expect(prisma.ticket.updateMany).toHaveBeenCalledWith({
+        where: { id: 'ticket-1', scannedAt: null },
+        data: { scannedAt: expect.any(Date) },
+      });
+      expect(result).toEqual({
+        valid: true,
+        ticket: { id: 'ticket-1', zoneId: 'zone-1', userId: 'user-1' },
+      });
+    });
+
+    it('CONCURRENCIA: el segundo escaneo del mismo boleto ve valid:false (no ambos ganan)', async () => {
+      prisma.ticket.updateMany.mockResolvedValue({ count: 0 }); // ya lo marcó otro escaneo
+      const scannedAt = new Date();
+      prisma.ticket.findUnique.mockResolvedValue({
+        id: 'ticket-1',
+        scannedAt,
+      });
+
+      const result = await service.validateScan('ticket-1');
+
+      expect(result).toEqual({
+        valid: false,
+        reason: 'Este boleto ya fue usado',
+        scannedAt,
+      });
+    });
+
+    it('lanza NotFoundException si el boleto no existe', async () => {
+      prisma.ticket.updateMany.mockResolvedValue({ count: 0 });
+      prisma.ticket.findUnique.mockResolvedValue(null);
+
+      await expect(service.validateScan('no-existe')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
   });
 });

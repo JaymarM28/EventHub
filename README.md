@@ -29,7 +29,7 @@ pnpm dev:infra:down     # apagar
 
 - RabbitMQ management UI: http://localhost:15674 (user/pass en `.env`)
 - Postgres: `localhost:5434`, bases separadas `auth_db`, `events_db`,
-  `tickets_db`, `orders_db`, `notifications_db` (ver
+  `tickets_db`, `orders_db`, `notifications_db`, `access_db` (ver
   `infra/postgres/init-multiple-databases.sh`)
 - Redis: `localhost:6381`
 
@@ -68,7 +68,12 @@ cd apps/notifications-service
 pnpm prisma:migrate
 pnpm start:dev
 
-# Terminal 6 — api-gateway (puerto 3010, único servicio pensado para exponerse)
+# Terminal 6 — access-service (puerto 3006, validación de QR)
+cd apps/access-service
+pnpm prisma:migrate
+pnpm start:dev
+
+# Terminal 7 — api-gateway (puerto 3010, único servicio pensado para exponerse)
 cd apps/api-gateway
 pnpm start:dev
 ```
