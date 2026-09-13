@@ -228,10 +228,11 @@ Roadmap paso a paso (orden lógico de construcción):
    duplicados/fraude básico. Decisión explícita: consume `tickets-service` vía
    llamada síncrona (API), no evento — es una consulta de estado en el momento del
    escaneo (¿este boleto es válido ahora?), no una reacción a un cambio de estado.
-8. **Checkpoint de verificación end-to-end (curl/Postman)**: antes de invertir en
-   Flutter, probar el flujo completo comprar → recibir boleto → validar solo con
-   requests HTTP. Da una victoria visible temprana y aísla bugs de backend antes
-   de mezclarlos con bugs de la app móvil.
+8. **Checkpoint de verificación end-to-end** ✅ — `scripts/e2e-check.sh`: compila
+   y levanta los 7 servicios, corre el flujo completo (registro → evento →
+   compra → sobreventa bloqueada → notificaciones → escaneo de acceso →
+   verificación de seguridad del gateway) con asserts reales contra Postgres/
+   RabbitMQ/Redis, y limpia los datos de prueba. 26/26 checks en verde.
 9. **Flutter app** (subdividido — es el cierre del flujo end-to-end principal;
    sistema de diseño e interacción en `DESIGN_SYSTEM.md`, basado en el skill
    `apple-design`):
