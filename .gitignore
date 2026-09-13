@@ -7,6 +7,9 @@ dist/
 build/
 .turbo/
 
+# Cliente Prisma generado (output propio por servicio, ver schema.prisma)
+apps/*/generated/
+
 # Environment
 .env
 .env.local

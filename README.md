@@ -47,7 +47,12 @@ cd apps/auth-service
 pnpm prisma:migrate   # solo la primera vez / tras cambios al schema
 pnpm start:dev
 
-# Terminal 2 — api-gateway (puerto 3010, único servicio pensado para exponerse)
+# Terminal 2 — events-service (puerto 3002)
+cd apps/events-service
+pnpm prisma:migrate
+pnpm start:dev
+
+# Terminal 3 — api-gateway (puerto 3010, único servicio pensado para exponerse)
 cd apps/api-gateway
 pnpm start:dev
 ```
@@ -63,6 +68,17 @@ curl -X POST http://localhost:3010/auth/register \
 `JWT_SECRET` e `INTERNAL_AUTH_SECRET` deben ser idénticos entre
 `auth-service` y `api-gateway` (y, a futuro, todos los servicios internos)
 — ver los comentarios en cada `.env.example`.
+
+## Gotchas del monorepo
+
+**Cada schema.prisma DEBE declarar su propio `output`.** pnpm dedupea
+`@prisma/client` a una sola ubicación física por versión resuelta — sin un
+`output` propio por servicio, el último `prisma generate` que corras (de
+CUALQUIER servicio) sobrescribe el cliente generado de los demás, y los
+otros servicios truenan en runtime con `Cannot read properties of
+undefined (reading 'findUnique')`. Ya configurado en `auth-service` y
+`events-service` (`output = "../generated/prisma-client"`) — replicar en
+cada servicio nuevo que use Prisma.
 
 ## Estructura
 

@@ -21,14 +21,16 @@ const { payload, signature } = signInternalContext(
 ## Uso en un microservicio interno (consumidor)
 
 ```ts
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, Reflector } from '@nestjs/core';
 import { InternalAuthGuard, InternalUser, InternalUserContext } from '@event-hub/internal-auth';
 
 @Module({
   providers: [
     {
       provide: APP_GUARD,
-      useFactory: () => new InternalAuthGuard(process.env.INTERNAL_AUTH_SECRET!),
+      useFactory: (reflector: Reflector) =>
+        new InternalAuthGuard(process.env.INTERNAL_AUTH_SECRET!, reflector),
+      inject: [Reflector],
     },
   ],
 })
@@ -45,3 +47,34 @@ export class TicketsController {
 
 `INTERNAL_AUTH_SECRET` debe ser idéntico en `api-gateway` y en todos los
 servicios internos (ver `.env.example` en la raíz del monorepo).
+
+## Autorización por rol
+
+```ts
+import { APP_GUARD, Reflector } from '@nestjs/core';
+import { InternalAuthGuard, RolesGuard, Roles, Public } from '@event-hub/internal-auth';
+
+@Module({
+  providers: [
+    {
+      provide: APP_GUARD,
+      useFactory: (reflector: Reflector) =>
+        new InternalAuthGuard(process.env.INTERNAL_AUTH_SECRET!, reflector),
+      inject: [Reflector],
+    },
+    { provide: APP_GUARD, useClass: RolesGuard }, // DESPUÉS de InternalAuthGuard
+  ],
+})
+export class AppModule {}
+
+@Controller('events')
+export class EventsController {
+  @Post()
+  @Roles('ORGANIZER', 'SUPER_ADMIN')
+  create(@Body() dto: CreateEventDto) { ... }
+
+  @Get()
+  @Public() // navegar eventos no requiere login
+  findAll() { ... }
+}
+```

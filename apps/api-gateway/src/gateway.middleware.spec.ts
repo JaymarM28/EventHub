@@ -24,6 +24,14 @@ function mockReqRes(headers: Record<string, string> = {}) {
   return { req, res, next };
 }
 
+function validToken() {
+  return jwt.sign(
+    { sub: 'user-1', email: 'a@b.com', roles: ['ATTENDEE'] },
+    JWT_SECRET,
+    { expiresIn: '15m' },
+  );
+}
+
 describe('stripClientInternalHeaders', () => {
   it('elimina cualquier header interno que venga del cliente', () => {
     const { req, res, next } = mockReqRes({
@@ -43,15 +51,20 @@ describe('gatewayAuthMiddleware', () => {
   const publicRoute: ServiceRoute = {
     pathPrefix: '/auth',
     target: 'http://x',
-    public: true,
+    authMode: 'public',
   };
-  const protectedRoute: ServiceRoute = {
+  const optionalRoute: ServiceRoute = {
+    pathPrefix: '/events',
+    target: 'http://z',
+    authMode: 'optional',
+  };
+  const requiredRoute: ServiceRoute = {
     pathPrefix: '/tickets',
     target: 'http://y',
-    public: false,
+    authMode: 'required',
   };
 
-  it('en una ruta pública, deja pasar sin tocar headers', () => {
+  it("'public': deja pasar sin tocar headers", () => {
     const { req, res, next } = mockReqRes();
     const middleware = gatewayAuthMiddleware(publicRoute, JWT_SECRET, INTERNAL_SECRET);
 
@@ -61,9 +74,9 @@ describe('gatewayAuthMiddleware', () => {
     expect(req.headers[INTERNAL_CONTEXT_HEADER]).toBeUndefined();
   });
 
-  it('en una ruta protegida sin Authorization, responde 401 y no llama next()', () => {
+  it("'required' sin Authorization: responde 401 y no llama next()", () => {
     const { req, res, next } = mockReqRes();
-    const middleware = gatewayAuthMiddleware(protectedRoute, JWT_SECRET, INTERNAL_SECRET);
+    const middleware = gatewayAuthMiddleware(requiredRoute, JWT_SECRET, INTERNAL_SECRET);
 
     middleware(req, res, next);
 
@@ -71,23 +84,48 @@ describe('gatewayAuthMiddleware', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  it('en una ruta protegida con JWT válido, firma el contexto y llama next()', () => {
-    const token = jwt.sign(
-      { sub: 'user-1', email: 'a@b.com', roles: ['ATTENDEE'] },
-      JWT_SECRET,
-      { expiresIn: '15m' },
-    );
-    const { req, res, next } = mockReqRes({ authorization: `Bearer ${token}` });
-    const middleware = gatewayAuthMiddleware(protectedRoute, JWT_SECRET, INTERNAL_SECRET);
+  it("'required' con JWT válido: firma el contexto y llama next()", () => {
+    const { req, res, next } = mockReqRes({ authorization: `Bearer ${validToken()}` });
+    const middleware = gatewayAuthMiddleware(requiredRoute, JWT_SECRET, INTERNAL_SECRET);
 
     middleware(req, res, next);
 
     expect(next).toHaveBeenCalledTimes(1);
-    expect(req.headers.authorization).toBeUndefined(); // no debe llegar el JWT crudo al servicio interno
+    expect(req.headers.authorization).toBeUndefined();
 
     const payload = req.headers[INTERNAL_CONTEXT_HEADER] as string;
     const signature = req.headers[INTERNAL_SIGNATURE_HEADER] as string;
     const context = verifyInternalContext(payload, signature, INTERNAL_SECRET);
     expect(context.userId).toBe('user-1');
+  });
+
+  it("'optional' sin Authorization: pasa como anónimo, sin header interno", () => {
+    const { req, res, next } = mockReqRes();
+    const middleware = gatewayAuthMiddleware(optionalRoute, JWT_SECRET, INTERNAL_SECRET);
+
+    middleware(req, res, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(req.headers[INTERNAL_CONTEXT_HEADER]).toBeUndefined();
+  });
+
+  it("'optional' con JWT válido: firma el contexto igual que 'required'", () => {
+    const { req, res, next } = mockReqRes({ authorization: `Bearer ${validToken()}` });
+    const middleware = gatewayAuthMiddleware(optionalRoute, JWT_SECRET, INTERNAL_SECRET);
+
+    middleware(req, res, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(req.headers[INTERNAL_CONTEXT_HEADER]).toBeDefined();
+  });
+
+  it("'optional' con JWT inválido: NO degrada a anónimo, responde 401", () => {
+    const { req, res, next } = mockReqRes({ authorization: 'Bearer token-basura' });
+    const middleware = gatewayAuthMiddleware(optionalRoute, JWT_SECRET, INTERNAL_SECRET);
+
+    middleware(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
   });
 });

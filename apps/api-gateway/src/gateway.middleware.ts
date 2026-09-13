@@ -24,8 +24,12 @@ export function stripClientInternalHeaders(
 }
 
 /**
- * Para rutas protegidas: valida el JWT y agrega el header interno firmado.
- * Para rutas públicas (auth/*): no hace nada, deja pasar directo al proxy.
+ * - 'public': deja pasar sin tocar nada (auth-service).
+ * - 'optional': si NO viene Authorization, deja pasar como anónimo (el
+ *   servicio interno decide con @Public()); si SÍ viene, debe ser válido o
+ *   falla con 401 (un token presente pero inválido nunca degrada
+ *   silenciosamente a "anónimo").
+ * - 'required': siempre exige un JWT válido.
  */
 export function gatewayAuthMiddleware(
   route: ServiceRoute,
@@ -33,7 +37,12 @@ export function gatewayAuthMiddleware(
   internalAuthSecret: string,
 ): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
-    if (route.public) {
+    if (route.authMode === 'public') {
+      next();
+      return;
+    }
+
+    if (route.authMode === 'optional' && !req.headers.authorization) {
       next();
       return;
     }

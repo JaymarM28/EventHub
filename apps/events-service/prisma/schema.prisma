@@ -1,0 +1,38 @@
+generator client {
+  provider = "prisma-client-js"
+  // Output propio por servicio — ver el comentario equivalente en
+  // apps/auth-service/prisma/schema.prisma (pnpm dedupea @prisma/client a
+  // una sola ubicación física entre servicios sin esto).
+  output   = "../generated/prisma-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Event {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  venue       String
+  startsAt    DateTime
+  organizerId String // userId del token — no hay FK cross-DB entre servicios
+  zones       Zone[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("events")
+}
+
+model Zone {
+  id       String @id @default(uuid())
+  eventId  String
+  event    Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  name     String
+  price    Decimal @db.Decimal(10, 2)
+  capacity Int
+
+  @@index([eventId])
+  @@map("zones")
+}

@@ -1,5 +1,10 @@
 generator client {
   provider = "prisma-client-js"
+  // Output propio por servicio — sin esto, pnpm dedupea @prisma/client a una
+  // sola ubicación física y el último `prisma generate` de CUALQUIER
+  // servicio sobrescribe el cliente de los demás (visto en producción:
+  // events-service pisó el cliente de auth-service, "User" dejó de existir).
+  output   = "../generated/prisma-client"
 }
 
 datasource db {
