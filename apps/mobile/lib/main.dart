@@ -8,7 +8,9 @@ import 'core/auth_state.dart';
 import 'core/theme/app_theme.dart';
 import 'core/token_storage.dart';
 import 'features/auth/auth_repository.dart';
+import 'features/checkout/orders_repository.dart';
 import 'features/events/events_repository.dart';
+import 'features/tickets/tickets_repository.dart';
 
 Future<void> main() async {
   // DateFormat con locale 'es' (nombres de mes/día en español) lanza
@@ -30,11 +32,19 @@ Future<void> main() async {
   final authRepository = AuthRepository(apiClient, tokenStorage);
   authState = AuthState(authRepository);
   final eventsRepository = EventsRepository(apiClient);
+  final ordersRepository = OrdersRepository(apiClient);
+  final ticketsRepository = TicketsRepository(apiClient);
   final router = buildRouter(authState);
 
   authState.bootstrap();
 
-  runApp(EventHubApp(authState: authState, eventsRepository: eventsRepository, router: router));
+  runApp(EventHubApp(
+    authState: authState,
+    eventsRepository: eventsRepository,
+    ordersRepository: ordersRepository,
+    ticketsRepository: ticketsRepository,
+    router: router,
+  ));
 }
 
 class EventHubApp extends StatelessWidget {
@@ -42,11 +52,15 @@ class EventHubApp extends StatelessWidget {
     super.key,
     required this.authState,
     required this.eventsRepository,
+    required this.ordersRepository,
+    required this.ticketsRepository,
     required this.router,
   });
 
   final AuthState authState;
   final EventsRepository eventsRepository;
+  final OrdersRepository ordersRepository;
+  final TicketsRepository ticketsRepository;
   final GoRouter router;
 
   @override
@@ -55,6 +69,8 @@ class EventHubApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider.value(value: authState),
         Provider.value(value: eventsRepository),
+        Provider.value(value: ordersRepository),
+        Provider.value(value: ticketsRepository),
       ],
       child: MaterialApp.router(
         title: 'Event Hub',

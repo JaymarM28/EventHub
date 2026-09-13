@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import '../../core/auth_state.dart';
 import '../../core/theme/app_theme.dart';
+import '../checkout/checkout_sheet.dart';
+import '../tickets/ticket_screen.dart';
 import 'event_models.dart';
 import 'events_repository.dart';
 
@@ -21,6 +25,19 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
   void initState() {
     super.initState();
     _future = context.read<EventsRepository>().findOne(widget.eventId);
+  }
+
+  Future<void> _onZoneTap(BuildContext context, EventModel event, ZoneModel zone) async {
+    if (context.read<AuthState>().status != AuthStatus.authenticated) {
+      context.push('/login');
+      return;
+    }
+    final ticket = await showCheckoutSheet(context, event: event, zone: zone);
+    if (ticket != null && context.mounted) {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => TicketScreen(ticket: ticket, event: event, zone: zone)),
+      );
+    }
   }
 
   @override
@@ -82,11 +99,11 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
                     const SizedBox(height: 12),
                     ...event.zones.map((zone) => Padding(
                           padding: const EdgeInsets.only(bottom: 10),
-                          child: _ZoneTile(zone: zone),
+                          child: _ZoneTile(
+                            zone: zone,
+                            onTap: () => _onZoneTap(context, event, zone),
+                          ),
                         )),
-                    // El flujo de compra (checkout, bottom sheet de selección
-                    // de zona con spring momentum) se agrega en el paso 9b —
-                    // ver DESIGN_SYSTEM.md §12.
                   ]),
                 ),
               ),
@@ -119,35 +136,41 @@ class _InfoRow extends StatelessWidget {
 }
 
 class _ZoneTile extends StatelessWidget {
-  const _ZoneTile({required this.zone});
+  const _ZoneTile({required this.zone, required this.onTap});
   final ZoneModel zone;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(zone.name, style: Theme.of(context).textTheme.titleLarge),
-                const SizedBox(height: 2),
-                Text('${zone.capacity} cupos', style: Theme.of(context).textTheme.bodyMedium),
-              ],
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(zone.name, style: Theme.of(context).textTheme.titleLarge),
+                  const SizedBox(height: 2),
+                  Text('${zone.capacity} cupos', style: Theme.of(context).textTheme.bodyMedium),
+                ],
+              ),
             ),
-          ),
-          Text(
-            '\$${zone.price.toStringAsFixed(0)}',
-            style: const TextStyle(color: AppColors.accent, fontSize: 19, fontWeight: FontWeight.w700),
-          ),
-        ],
+            Text(
+              '\$${zone.price.toStringAsFixed(0)}',
+              style: const TextStyle(color: AppColors.accent, fontSize: 19, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(width: 4),
+            const Icon(Icons.chevron_right_rounded, color: AppColors.inkSoft),
+          ],
+        ),
       ),
     );
   }

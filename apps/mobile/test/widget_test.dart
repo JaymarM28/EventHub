@@ -10,7 +10,9 @@ import 'package:mobile/core/api_client.dart';
 import 'package:mobile/core/auth_state.dart';
 import 'package:mobile/core/token_storage.dart';
 import 'package:mobile/features/auth/auth_repository.dart';
+import 'package:mobile/features/checkout/orders_repository.dart';
 import 'package:mobile/features/events/events_repository.dart';
+import 'package:mobile/features/tickets/tickets_repository.dart';
 import 'package:mobile/main.dart';
 
 /// TokenStorage real usa flutter_secure_storage (canal de plataforma), que
@@ -91,11 +93,15 @@ void main() {
     final authRepository = AuthRepository(apiClient, tokenStorage);
     authState = AuthState(authRepository);
     final eventsRepository = EventsRepository(apiClient);
+    final ordersRepository = OrdersRepository(apiClient);
+    final ticketsRepository = TicketsRepository(apiClient);
     final router = buildRouter(authState);
 
     await tester.pumpWidget(EventHubApp(
       authState: authState,
       eventsRepository: eventsRepository,
+      ordersRepository: ordersRepository,
+      ticketsRepository: ticketsRepository,
       router: router,
     ));
     // pumpAndSettle no sirve acá: mientras la carga está pendiente se

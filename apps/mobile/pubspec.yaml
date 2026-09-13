@@ -54,6 +54,9 @@ dependencies:
   # identidad de marca sin perder el tuning óptico de una fuente diseñada
   # para UI.
   google_fonts: ^6.2.1
+  # Renderiza el qrToken del boleto (ver tickets-service) como imagen QR —
+  # el token ya viene firmado (HMAC) del backend, esto solo lo dibuja.
+  qr_flutter: ^4.1.0
 
 dev_dependencies:
   flutter_test:

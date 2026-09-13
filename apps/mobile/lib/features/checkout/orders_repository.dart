@@ -1,0 +1,33 @@
+import 'package:dio/dio.dart';
+import '../../core/api_client.dart';
+import 'order_models.dart';
+
+class CheckoutException implements Exception {
+  CheckoutException(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
+class OrdersRepository {
+  OrdersRepository(this._apiClient);
+
+  final ApiClient _apiClient;
+
+  Future<OrderModel> checkout(String zoneId) async {
+    try {
+      final response = await _apiClient.dio.post('/orders/checkout', data: {'zoneId': zoneId});
+      return OrderModel.fromJson(response.data as Map<String, dynamic>);
+    } on DioException catch (e) {
+      throw CheckoutException(_extractMessage(e));
+    }
+  }
+
+  String _extractMessage(DioException e) {
+    final data = e.response?.data;
+    if (data is Map && data['message'] != null) {
+      return data['message'].toString();
+    }
+    return 'No se pudo conectar con el servidor';
+  }
+}

@@ -236,8 +236,8 @@ Roadmap paso a paso (orden lógico de construcción):
 9. **Flutter app** (subdividido — es el cierre del flujo end-to-end principal;
    sistema de diseño e interacción en `DESIGN_SYSTEM.md`, basado en el skill
    `apple-design`):
-   - 9a. Auth + listado/detalle de eventos (login, ver eventos, ver zonas/precios).
-   - 9b. Checkout + emisión de boleto (comprar, ver el boleto con QR recibido).
+   - 9a. ✅ Auth + listado/detalle de eventos (login, ver eventos, ver zonas/precios).
+   - 9b. ✅ Checkout + emisión de boleto (comprar, ver el boleto con QR recibido).
    - 9c. Escaneo/validación de QR en tiempo real contra access-service (rol STAFF
      o dispositivo de control de acceso).
    Al completar 9c, el flujo "comprar → recibir boleto → validar en puerta" está

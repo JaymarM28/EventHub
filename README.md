@@ -122,6 +122,15 @@ flutter test
 - El emulador de Android no resuelve `localhost` como el host — la app usa
   `10.0.2.2` automáticamente ahí (ver `lib/core/config.dart`); el
   simulador de iOS sí comparte red con el host.
+- **Checkout (paso 9b):** tocar una zona abre un bottom sheet de confirmación
+  (`showCheckoutSheet`); `POST /orders/checkout` solo confirma el pago — la
+  emisión del boleto es asíncrona (outbox → RabbitMQ → tickets-service), así
+  que el sheet hace polling corto a `GET /tickets/mine` hasta que el boleto
+  del pedido aparece (no hay `GET /tickets/:id`). El boleto se muestra con su
+  QR (`qr_flutter`, dibuja el `qrToken` firmado tal cual lo entrega el
+  backend) en una pantalla que se cierra con swipe hacia abajo usando
+  `SpringSimulation` real (velocity handoff + proyección de momentum, ver
+  DESIGN_SYSTEM.md §2-6) — no un `Curves` fijo.
 
 **Limitación conocida: `mobile_scanner` (QR, paso 9c) no compila para el
 simulador de iOS en Mac Apple Silicon.** Los pods de Google MLKit no traen
@@ -181,7 +190,8 @@ Ver el detalle completo en `DESIGN.md` — resumen de los primeros pasos:
 6. notifications-service.
 7. access-service.
 8. Checkpoint end-to-end con curl/Postman.
-9. Flutter app: 9a ✅ auth/eventos (probado en Android emulator contra el
-   backend real). 9b checkout, 9c escaneo QR — pendientes.
+9. Flutter app: 9a ✅ auth/eventos, 9b ✅ checkout + boleto con QR (ambos
+   probados en Android emulator contra el backend real). 9c escaneo QR —
+   pendiente.
 
 Fase opcional/stretch: admin panel web, ai-service, Kubernetes, reembolsos.
