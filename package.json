@@ -1,0 +1,15 @@
+{
+  "name": "event-hub-microservices",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Event Hub — plataforma de boletería como microservicios (proyecto de aprendizaje).",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "packageManager": "pnpm@11.20.0",
+  "scripts": {
+    "dev:infra": "docker compose up -d postgres rabbitmq redis",
+    "dev:infra:down": "docker compose down",
+    "dev:infra:logs": "docker compose logs -f postgres rabbitmq redis"
+  }
+}

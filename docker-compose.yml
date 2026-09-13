@@ -1,0 +1,69 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: event-hub-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-eventhub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-eventhub}
+      # Bases separadas por servicio (database-per-service, un solo contenedor
+      # para simplificar el aprendizaje — cada NestJS service usa la suya).
+      POSTGRES_MULTIPLE_DATABASES: auth_db,events_db,tickets_db,orders_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init-multiple-databases.sh:/docker-entrypoint-initdb.d/init-multiple-databases.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-eventhub}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - event-hub
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: event-hub-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-eventhub}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-eventhub}
+    ports:
+      - "5672:5672"   # AMQP
+      - "15672:15672" # Management UI — http://localhost:15672
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - event-hub
+
+  redis:
+    image: redis:7-alpine
+    container_name: event-hub-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - event-hub
+
+networks:
+  event-hub:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
+  redis_data:

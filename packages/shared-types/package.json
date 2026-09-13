@@ -1,0 +1,15 @@
+{
+  "name": "@event-hub/shared-types",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tipos y contratos compartidos entre microservicios: envelope de eventos, idempotencia, nombres de colas.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}
