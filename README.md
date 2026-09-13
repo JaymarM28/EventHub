@@ -78,6 +78,22 @@ cd apps/api-gateway
 pnpm start:dev
 ```
 
+## Checkpoint end-to-end (paso 8)
+
+En vez de levantar y probar cada servicio a mano, `scripts/e2e-check.sh`
+compila los 7 servicios, los levanta contra la infraestructura real, corre
+el flujo completo (registro → evento → compra → sobreventa bloqueada →
+notificaciones → escaneo de acceso → verificación de seguridad del
+gateway), y limpia los datos de prueba al terminar — sin importar si pasó
+o falló.
+
+```bash
+pnpm dev:infra              # la infra debe estar arriba primero
+./scripts/e2e-check.sh              # build + levantar + probar + apagar
+./scripts/e2e-check.sh --no-build   # reusa los dist/ ya compilados (más rápido)
+./scripts/e2e-check.sh --keep-up    # no apaga los servicios al terminar
+```
+
 Probar el flujo de auth a través del gateway:
 
 ```bash
