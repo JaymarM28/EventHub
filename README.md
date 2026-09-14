@@ -131,6 +131,17 @@ flutter test
   backend) en una pantalla que se cierra con swipe hacia abajo usando
   `SpringSimulation` real (velocity handoff + proyección de momentum, ver
   DESIGN_SYSTEM.md §2-6) — no un `Curves` fijo.
+- **Escaneo de acceso (paso 9c):** ícono de QR en el AppBar de `/events`
+  visible solo si el JWT trae rol `STAFF` u `ORGANIZER`
+  (`AuthState.canScan`, decodificado del claim `roles` — no hay endpoint
+  `/auth/me`). `app_router.dart` también bloquea `/scan` por redirect si
+  alguien llega ahí sin el rol. **Esto es solo un bloqueo del lado del
+  cliente** — `access-service` todavía no exige el rol en el backend (ver
+  TODOS.md #4), así que no reemplaza autorización real. `POST /access/scan`
+  devuelve un estado explícito por resultado (`VALID`/`ALREADY_USED`/
+  `INVALID`/`DEGRADED`, este último para cuando tickets-service no responde,
+  TODOS.md #3) — la pantalla vibra y colorea el visor en el mismo frame que
+  detecta un código, sin esperar la respuesta de red.
 
 **Limitación conocida: `mobile_scanner` (QR, paso 9c) no compila para el
 simulador de iOS en Mac Apple Silicon.** Los pods de Google MLKit no traen

@@ -32,12 +32,18 @@ class _EventListScreenState extends State<EventListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isAuthenticated = context.watch<AuthState>().status == AuthStatus.authenticated;
+    final authState = context.watch<AuthState>();
+    final isAuthenticated = authState.status == AuthStatus.authenticated;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Eventos'),
         actions: [
+          if (authState.canScan)
+            IconButton(
+              icon: const Icon(Icons.qr_code_scanner_rounded),
+              onPressed: () => context.push('/scan'),
+            ),
           if (isAuthenticated)
             IconButton(
               icon: const Icon(Icons.logout_rounded),

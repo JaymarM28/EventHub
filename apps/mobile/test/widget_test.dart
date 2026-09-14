@@ -9,6 +9,7 @@ import 'package:mobile/app_router.dart';
 import 'package:mobile/core/api_client.dart';
 import 'package:mobile/core/auth_state.dart';
 import 'package:mobile/core/token_storage.dart';
+import 'package:mobile/features/access/access_repository.dart';
 import 'package:mobile/features/auth/auth_repository.dart';
 import 'package:mobile/features/checkout/orders_repository.dart';
 import 'package:mobile/features/events/events_repository.dart';
@@ -95,6 +96,7 @@ void main() {
     final eventsRepository = EventsRepository(apiClient);
     final ordersRepository = OrdersRepository(apiClient);
     final ticketsRepository = TicketsRepository(apiClient);
+    final accessRepository = AccessRepository(apiClient);
     final router = buildRouter(authState);
 
     await tester.pumpWidget(EventHubApp(
@@ -102,6 +104,7 @@ void main() {
       eventsRepository: eventsRepository,
       ordersRepository: ordersRepository,
       ticketsRepository: ticketsRepository,
+      accessRepository: accessRepository,
       router: router,
     ));
     // pumpAndSettle no sirve acá: mientras la carga está pendiente se

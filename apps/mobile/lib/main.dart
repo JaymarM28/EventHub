@@ -7,6 +7,7 @@ import 'core/api_client.dart';
 import 'core/auth_state.dart';
 import 'core/theme/app_theme.dart';
 import 'core/token_storage.dart';
+import 'features/access/access_repository.dart';
 import 'features/auth/auth_repository.dart';
 import 'features/checkout/orders_repository.dart';
 import 'features/events/events_repository.dart';
@@ -34,6 +35,7 @@ Future<void> main() async {
   final eventsRepository = EventsRepository(apiClient);
   final ordersRepository = OrdersRepository(apiClient);
   final ticketsRepository = TicketsRepository(apiClient);
+  final accessRepository = AccessRepository(apiClient);
   final router = buildRouter(authState);
 
   authState.bootstrap();
@@ -43,6 +45,7 @@ Future<void> main() async {
     eventsRepository: eventsRepository,
     ordersRepository: ordersRepository,
     ticketsRepository: ticketsRepository,
+    accessRepository: accessRepository,
     router: router,
   ));
 }
@@ -54,6 +57,7 @@ class EventHubApp extends StatelessWidget {
     required this.eventsRepository,
     required this.ordersRepository,
     required this.ticketsRepository,
+    required this.accessRepository,
     required this.router,
   });
 
@@ -61,6 +65,7 @@ class EventHubApp extends StatelessWidget {
   final EventsRepository eventsRepository;
   final OrdersRepository ordersRepository;
   final TicketsRepository ticketsRepository;
+  final AccessRepository accessRepository;
   final GoRouter router;
 
   @override
@@ -71,6 +76,7 @@ class EventHubApp extends StatelessWidget {
         Provider.value(value: eventsRepository),
         Provider.value(value: ordersRepository),
         Provider.value(value: ticketsRepository),
+        Provider.value(value: accessRepository),
       ],
       child: MaterialApp.router(
         title: 'Event Hub',

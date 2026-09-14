@@ -16,6 +16,8 @@ class AppColors {
   static const accent = Color(0xFF5B4FE9); // índigo vivo — CTA, precio, activo
   static const accentSoft = Color(0xFFEEEBFC); // fondo del acento a baja opacidad
   static const error = Color(0xFFDC3D43);
+  static const success = Color(0xFF1E9E5A);
+  static const warning = Color(0xFFB5760A);
 }
 
 /// Tipografía por escala (DESIGN_SYSTEM.md §11): tracking negativo y

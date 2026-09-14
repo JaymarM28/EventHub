@@ -238,10 +238,12 @@ Roadmap paso a paso (orden lógico de construcción):
    `apple-design`):
    - 9a. ✅ Auth + listado/detalle de eventos (login, ver eventos, ver zonas/precios).
    - 9b. ✅ Checkout + emisión de boleto (comprar, ver el boleto con QR recibido).
-   - 9c. Escaneo/validación de QR en tiempo real contra access-service (rol STAFF
-     o dispositivo de control de acceso).
-   Al completar 9c, el flujo "comprar → recibir boleto → validar en puerta" está
-   funcionando end-to-end — el hito central de "todo el aplicativo funcionando".
+   - 9c. ✅ Escaneo/validación de QR en tiempo real contra access-service (rol
+     STAFF/ORGANIZER; enforcement solo en el cliente por ahora, ver TODOS.md #4).
+   El flujo "comprar → recibir boleto → validar en puerta" ya funciona
+   end-to-end — el hito central de "todo el aplicativo funcionando" está
+   cumplido. Pendiente: probar 9c en iOS (bloqueado por TODOS.md #5) y
+   cerrar el enforcement de rol del lado del backend (TODOS.md #4).
 
 **Fase opcional/stretch (después de que el flujo end-to-end del paso 9 funcione):**
 

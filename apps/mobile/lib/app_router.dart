@@ -1,5 +1,6 @@
 import 'package:go_router/go_router.dart';
 import 'core/auth_state.dart';
+import 'features/access/scan_screen.dart';
 import 'features/auth/login_screen.dart';
 import 'features/auth/register_screen.dart';
 import 'features/events/event_detail_screen.dart';
@@ -19,6 +20,13 @@ GoRouter buildRouter(AuthState authState) {
       if (authState.status == AuthStatus.authenticated && loggingIn) {
         return '/events';
       }
+      // El escaneo de acceso (9c) es solo para STAFF/ORGANIZER — el backend
+      // no lo exige todavía (TODOS.md #4), así que esta es la única barrera
+      // real por ahora. Cualquiera que llegue aquí sin el rol rebota a
+      // /events, no ve ni un flash de la cámara.
+      if (state.matchedLocation == '/scan' && (authState.status != AuthStatus.authenticated || !authState.canScan)) {
+        return '/events';
+      }
       return null;
     },
     routes: [
@@ -29,6 +37,7 @@ GoRouter buildRouter(AuthState authState) {
         path: '/events/:id',
         builder: (context, state) => EventDetailScreen(eventId: state.pathParameters['id']!),
       ),
+      GoRoute(path: '/scan', builder: (context, state) => const ScanScreen()),
     ],
   );
 }

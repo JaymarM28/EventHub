@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:dio/dio.dart';
 import '../../core/api_client.dart';
 import '../../core/token_storage.dart';
@@ -54,6 +55,23 @@ class AuthRepository {
 
   Future<bool> hasSession() async {
     return await _tokenStorage.accessToken != null;
+  }
+
+  /// No hay endpoint `/auth/me` — los roles ya viajan en el claim `roles`
+  /// del access token (ver auth-service), así que se leen ahí en vez de
+  /// pedirle un viaje de red extra al backend.
+  Future<List<String>> currentRoles() async {
+    final token = await _tokenStorage.accessToken;
+    if (token == null) return [];
+    try {
+      final parts = token.split('.');
+      if (parts.length != 3) return [];
+      final normalized = base64Url.normalize(parts[1]);
+      final payload = jsonDecode(utf8.decode(base64Url.decode(normalized))) as Map<String, dynamic>;
+      return (payload['roles'] as List<dynamic>?)?.map((r) => r.toString()).toList() ?? [];
+    } catch (_) {
+      return [];
+    }
   }
 
   String _extractMessage(DioException e) {

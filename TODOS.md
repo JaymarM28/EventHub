@@ -68,8 +68,12 @@ escaneo devolvió `DEGRADED` con mensaje claro, y quedó registrado en
 
 **What:** `POST /access/scan` y `POST /internal/tickets/:id/validate` (y
 `POST /events`, `PATCH /events/:id`) no filtran por rol STAFF/ORGANIZER a
-nivel de `@Roles(...)` de forma completa — actualmente cualquier usuario
-autenticado puede escanear boletos ajenos.
+nivel de `@Roles(...)` de forma completa — el backend sigue dejando que
+cualquier usuario autenticado escanee boletos ajenos si llama al endpoint
+directamente. La app Flutter (paso 9c) bloquea la pantalla de escaneo del
+lado del cliente (`AuthState.canScan`, `app_router.dart`) si el usuario no
+tiene STAFF/ORGANIZER en el JWT, pero eso es solo UX — no reemplaza el
+enforcement real en `access-service`.
 
 **Why:** Los roles VENDOR/STAFF están reservados en el modelo de datos desde
 `auth-service` (paso 2) pero nunca se activó su enforcement — la premisa
