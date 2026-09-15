@@ -121,10 +121,13 @@ en simulador, más rápido de iterar que un dispositivo físico.
 sin garantía de que el fix final sea limpio; puede que la respuesta
 correcta sea simplemente "iOS: solo dispositivo real para 9c".
 
-**Context:** Alternativas a evaluar cuando se llegue al paso 9c: (a)
-terminar de depurar la exclusión de arquitectura, (b) probar en un iPhone
-físico conectado, (c) evaluar un paquete de escaneo de QR alternativo sin
+**Context:** Alternativas a evaluar: (a) terminar de depurar la exclusión
+de arquitectura, (b) evaluar un paquete de escaneo de QR alternativo sin
 dependencia de MLKit (ej. basado en ZXing puro) si el problema persiste.
+**(b) — probar en un iPhone físico conectado — ya se hizo (paso 9c,
+2026-09-15): el escaneo con cámara real funciona sin este problema
+(VALID/ALREADY_USED confirmados en un iPhone 14 Pro Max)**, así que esto
+queda limitado únicamente al simulador de iOS, no bloquea nada más.
 
 **Depends on:** Paso 9c (escaneo de QR) del roadmap.
 

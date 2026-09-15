@@ -28,6 +28,17 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Event Hub usa la cámara para escanear el código QR del boleto en el control de acceso.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Event Hub se conecta al backend de desarrollo en tu red local.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<!-- Solo para desarrollo: permite HTTP plano hacia una IP literal en
+		     la red local (el api-gateway corriendo en el Mac, ver
+		     core/config.dart API_HOST) sin abrir tráfico arbitrario a
+		     internet. -->
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

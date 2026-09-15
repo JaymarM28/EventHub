@@ -121,7 +121,11 @@ flutter test
   (tokens en Keychain/Keystore, nunca en texto plano) y `provider`.
 - El emulador de Android no resuelve `localhost` como el host — la app usa
   `10.0.2.2` automáticamente ahí (ver `lib/core/config.dart`); el
-  simulador de iOS sí comparte red con el host.
+  simulador de iOS sí comparte red con el host. Un **dispositivo físico**
+  (Android o iOS) no comparte red de ninguna forma — pásale la IP de LAN
+  del Mac explícitamente:
+  `flutter run -d <device-id> --dart-define=API_HOST=192.168.1.23`. El
+  Mac y el teléfono deben estar en la misma red wifi.
 - **Checkout (paso 9b):** tocar una zona abre un bottom sheet de confirmación
   (`showCheckoutSheet`); `POST /orders/checkout` solo confirma el pago — la
   emisión del boleto es asíncrona (outbox → RabbitMQ → tickets-service), así
@@ -141,7 +145,9 @@ flutter test
   devuelve un estado explícito por resultado (`VALID`/`ALREADY_USED`/
   `INVALID`/`DEGRADED`, este último para cuando tickets-service no responde,
   TODOS.md #3) — la pantalla vibra y colorea el visor en el mismo frame que
-  detecta un código, sin esperar la respuesta de red.
+  detecta un código, sin esperar la respuesta de red. **Verificado con
+  cámara real en un iPhone físico**: detecta el QR, marca `VALID` la
+  primera vez y `ALREADY_USED` al reescanear el mismo boleto.
 
 **Limitación conocida: `mobile_scanner` (QR, paso 9c) no compila para el
 simulador de iOS en Mac Apple Silicon.** Los pods de Google MLKit no traen
@@ -150,8 +156,9 @@ conocido del ecosistema, no un bug de esta app. Mitigado parcialmente con
 `EXCLUDED_ARCHS[sdk=iphonesimulator*] = arm64` en el `Podfile` y en
 `Runner.xcodeproj` (fuerza x86_64 vía Rosetta), pero seguía fallando el
 link al momento de escribir esto — **probar la app completa en Android
-emulator o en un iPhone físico**; iOS simulator solo sirve para pantallas
-que no toquen `mobile_scanner` una vez este ajuste esté resuelto del todo.
+emulator o en un iPhone/Android físico** (ambos confirmados funcionando);
+iOS simulator solo sirve para pantallas que no toquen `mobile_scanner` una
+vez este ajuste esté resuelto del todo.
 
 ## Gotchas del monorepo
 
@@ -176,6 +183,20 @@ síncrona vía `@nestjs/axios` que recibe un 409 del servicio destino llega
 como `AxiosError` crudo — el exception filter de Nest lo convierte en 500
 si no se traduce explícitamente a `HttpException` con el status/mensaje
 originales (ver `tickets-client.service.ts`).
+
+**El proyecto NO debe vivir dentro de una carpeta sincronizada por iCloud
+Drive ("Escritorio y Documentos") si vas a compilar la app Flutter para un
+iPhone físico.** iCloud vuelve a etiquetar `Flutter.framework/Flutter` con
+el atributo extendido `com.apple.provenance` casi inmediatamente después
+de que `flutter_tools` lo borra (es una carrera, ver
+`removeExtendedAttributes` en `flutter_tools/lib/src/ios/mac.dart`), y
+`codesign` falla con `"resource fork, Finder information, or similar
+detritus not allowed"` — el build a simulador/Android no se ve afectado,
+solo el de dispositivo físico (que sí requiere firma real). Visto en vivo:
+el error desaparece por completo con el proyecto fuera de `~/Documents`
+(ej. `~/Developer/`). Si ya te pasó, un `xattr -d com.apple.provenance
+<archivo>` puntual no sirve porque vuelve a aparecer en el siguiente
+build.
 
 ## Estructura
 

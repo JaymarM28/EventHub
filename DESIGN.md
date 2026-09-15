@@ -242,7 +242,9 @@ Roadmap paso a paso (orden lógico de construcción):
      STAFF/ORGANIZER; enforcement solo en el cliente por ahora, ver TODOS.md #4).
    El flujo "comprar → recibir boleto → validar en puerta" ya funciona
    end-to-end — el hito central de "todo el aplicativo funcionando" está
-   cumplido. Pendiente: probar 9c en iOS (bloqueado por TODOS.md #5) y
+   cumplido, **verificado con cámara real en un iPhone físico** (VALID y
+   ALREADY_USED confirmados). Pendiente: probar 9c en el simulador de iOS
+   (bloqueado por TODOS.md #5, no aplica a dispositivo físico) y
    cerrar el enforcement de rol del lado del backend (TODOS.md #4).
 
 **Fase opcional/stretch (después de que el flujo end-to-end del paso 9 funcione):**
