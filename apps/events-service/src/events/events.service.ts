@@ -1,16 +1,19 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { InternalUserContext } from '@event-hub/internal-auth';
+import { InternalUserContext, RawInternalHeaders } from '@event-hub/internal-auth';
 import { EVENT_TYPES } from '@event-hub/shared-types';
 import { PrismaService } from '../prisma/prisma.service';
 import { DomainEventsPublisher } from '../messaging/domain-events.publisher';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
+import { AddStaffDto } from './dto/add-staff.dto';
+import { AuthClientService } from './auth-client.service';
 
 @Injectable()
 export class EventsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly publisher: DomainEventsPublisher,
+    private readonly authClient: AuthClientService,
   ) {}
 
   async create(dto: CreateEventDto, organizerId: string) {
@@ -78,5 +81,37 @@ export class EventsService {
     await this.publisher.publish(EVENT_TYPES.EVENT_UPDATED, event);
 
     return event;
+  }
+
+  /**
+   * Da de alta a alguien del equipo de STAFF del evento — mismo chequeo de
+   * ownership que `update()` (dueño del evento o SUPER_ADMIN), nunca por
+   * rol global únicamente (TODOS.md #4). Crea la cuenta en auth-service
+   * (con contraseña que define el organizador, decisión explícita — ver
+   * TODOS.md), guarda la relación evento↔staff acá, y emite
+   * event.staff-assigned para que access-service la sincronice sin
+   * depender en vivo de events-service en el camino del escaneo.
+   */
+  async addStaff(id: string, dto: AddStaffDto, requester: InternalUserContext, headers: RawInternalHeaders) {
+    const existing = await this.findOne(id); // 404 si no existe
+
+    const isOwner = existing.organizerId === requester.userId;
+    const isSuperAdmin = requester.roles.includes('SUPER_ADMIN');
+    if (!isOwner && !isSuperAdmin) {
+      throw new ForbiddenException('Solo el organizador dueño del evento puede agregar staff');
+    }
+
+    const createdUser = await this.authClient.createStaffUser(dto, headers);
+
+    const eventStaff = await this.prisma.eventStaff.create({
+      data: { eventId: id, userId: createdUser.id },
+    });
+
+    await this.publisher.publish(EVENT_TYPES.EVENT_STAFF_ASSIGNED, {
+      eventId: id,
+      userId: createdUser.id,
+    });
+
+    return { id: eventStaff.id, eventId: id, userId: createdUser.id, email: createdUser.email };
   }
 }

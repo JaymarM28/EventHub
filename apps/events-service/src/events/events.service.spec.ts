@@ -4,6 +4,9 @@ import { InternalUserContext } from '@event-hub/internal-auth';
 import { EventsService } from './events.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { DomainEventsPublisher } from '../messaging/domain-events.publisher';
+import { AuthClientService } from './auth-client.service';
+
+const headers = { 'x-internal-context': 'p', 'x-internal-signature': 's' };
 
 describe('EventsService', () => {
   let service: EventsService;
@@ -14,8 +17,12 @@ describe('EventsService', () => {
       findUnique: jest.Mock;
       update: jest.Mock;
     };
+    eventStaff: {
+      create: jest.Mock;
+    };
   };
   let publisher: { publish: jest.Mock };
+  let authClient: { createStaffUser: jest.Mock };
 
   const organizer: InternalUserContext = {
     userId: 'organizer-1',
@@ -42,14 +49,19 @@ describe('EventsService', () => {
         findUnique: jest.fn(),
         update: jest.fn(),
       },
+      eventStaff: {
+        create: jest.fn(),
+      },
     };
     publisher = { publish: jest.fn().mockResolvedValue(undefined) };
+    authClient = { createStaffUser: jest.fn() };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         EventsService,
         { provide: PrismaService, useValue: prisma },
         { provide: DomainEventsPublisher, useValue: publisher },
+        { provide: AuthClientService, useValue: authClient },
       ],
     }).compile();
 
@@ -133,6 +145,53 @@ describe('EventsService', () => {
       await expect(
         service.update('no-existe', { title: 'x' }, organizer),
       ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('addStaff', () => {
+    const staffDto = {
+      email: 'staff@b.com',
+      password: 'password123',
+      firstName: 'Luis',
+      lastName: 'Portero',
+      birthDate: '1995-01-01',
+    };
+
+    it('crea la cuenta en auth-service, guarda EventStaff, y publica event.staff-assigned', async () => {
+      prisma.event.findUnique.mockResolvedValue({ id: 'ev-1', organizerId: organizer.userId });
+      authClient.createStaffUser.mockResolvedValue({ id: 'user-staff-1', email: staffDto.email });
+      prisma.eventStaff.create.mockResolvedValue({ id: 'es-1' });
+
+      const result = await service.addStaff('ev-1', staffDto, organizer, headers);
+
+      expect(authClient.createStaffUser).toHaveBeenCalledWith(staffDto, headers);
+      expect(prisma.eventStaff.create).toHaveBeenCalledWith({
+        data: { eventId: 'ev-1', userId: 'user-staff-1' },
+      });
+      expect(publisher.publish).toHaveBeenCalledWith('event.staff-assigned', {
+        eventId: 'ev-1',
+        userId: 'user-staff-1',
+      });
+      expect(result).toMatchObject({ eventId: 'ev-1', userId: 'user-staff-1' });
+    });
+
+    it('rechaza a un organizador que no es dueño del evento — nunca llega a crear la cuenta', async () => {
+      prisma.event.findUnique.mockResolvedValue({ id: 'ev-1', organizerId: organizer.userId });
+
+      await expect(
+        service.addStaff('ev-1', staffDto, otherOrganizer, headers),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(authClient.createStaffUser).not.toHaveBeenCalled();
+    });
+
+    it('permite a un SUPER_ADMIN agregar staff a cualquier evento', async () => {
+      prisma.event.findUnique.mockResolvedValue({ id: 'ev-1', organizerId: organizer.userId });
+      authClient.createStaffUser.mockResolvedValue({ id: 'user-staff-1', email: staffDto.email });
+      prisma.eventStaff.create.mockResolvedValue({ id: 'es-1' });
+
+      await expect(
+        service.addStaff('ev-1', staffDto, superAdmin, headers),
+      ).resolves.toBeDefined();
     });
   });
 });

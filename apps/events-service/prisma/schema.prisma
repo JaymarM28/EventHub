@@ -19,6 +19,7 @@ model Event {
   startsAt    DateTime
   organizerId String // userId del token — no hay FK cross-DB entre servicios
   zones       Zone[]
+  staff       EventStaff[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -35,4 +36,22 @@ model Zone {
 
   @@index([eventId])
   @@map("zones")
+}
+
+/// Quién puede escanear el control de acceso de este evento, más allá del
+/// propio organizador (TODOS.md #4). Se crea al llamar
+/// POST /events/:id/staff — dispara la creación de la cuenta en
+/// auth-service y emite event.staff-assigned, que access-service consume
+/// para mantener su propia tabla local (mismo patrón que la sync de zonas
+/// en tickets-service, sin FK cross-servicio).
+model EventStaff {
+  id        String   @id @default(uuid())
+  eventId   String
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  userId    String // id devuelto por auth-service al crear la cuenta
+  createdAt DateTime @default(now())
+
+  @@unique([eventId, userId])
+  @@index([eventId])
+  @@map("event_staff")
 }

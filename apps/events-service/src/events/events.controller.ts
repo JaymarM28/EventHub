@@ -1,13 +1,16 @@
 import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import {
+  InternalHeaders,
   InternalUser,
   InternalUserContext,
   Public,
+  RawInternalHeaders,
   Roles,
 } from '@event-hub/internal-auth';
 import { EventsService } from './events.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
+import { AddStaffDto } from './dto/add-staff.dto';
 
 @Controller('events')
 export class EventsController {
@@ -39,5 +42,16 @@ export class EventsController {
     @InternalUser() user: InternalUserContext,
   ) {
     return this.eventsService.update(id, dto, user);
+  }
+
+  @Post(':id/staff')
+  @Roles('ORGANIZER', 'SUPER_ADMIN')
+  addStaff(
+    @Param('id') id: string,
+    @Body() dto: AddStaffDto,
+    @InternalUser() user: InternalUserContext,
+    @InternalHeaders() headers: RawInternalHeaders,
+  ) {
+    return this.eventsService.addStaff(id, dto, user, headers);
   }
 }

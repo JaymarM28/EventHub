@@ -11,6 +11,7 @@ import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { CreateInternalUserDto } from './dto/create-internal-user.dto';
 
 export interface TokenPair {
   accessToken: string;
@@ -46,10 +47,47 @@ export class AuthService {
 
     const passwordHash = await bcrypt.hash(dto.password, SALT_ROUNDS);
     const user = await this.prisma.user.create({
-      data: { email: dto.email, passwordHash },
+      data: {
+        email: dto.email,
+        passwordHash,
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        birthDate: new Date(dto.birthDate),
+      },
     });
 
     return this.issueTokens(user.id, user.email, user.roles);
+  }
+
+  /**
+   * Usado solo por el endpoint interno `POST /internal/users` — un
+   * organizador da de alta a alguien de su equipo de STAFF (ver
+   * events-service, EventsController.addStaff). A diferencia de
+   * `register()`, no emite tokens: la cuenta recién creada inicia sesión
+   * por su cuenta vía /auth/login con las credenciales que le dio el
+   * organizador.
+   */
+  async createWithRoles(dto: CreateInternalUserDto): Promise<{ id: string; email: string }> {
+    const existing = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
+    if (existing) {
+      throw new ConflictException('Ya existe una cuenta con ese email');
+    }
+
+    const passwordHash = await bcrypt.hash(dto.password, SALT_ROUNDS);
+    const user = await this.prisma.user.create({
+      data: {
+        email: dto.email,
+        passwordHash,
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        birthDate: new Date(dto.birthDate),
+        roles: dto.roles,
+      },
+    });
+
+    return { id: user.id, email: user.email };
   }
 
   async login(dto: LoginDto): Promise<TokenPair> {

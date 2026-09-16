@@ -16,20 +16,31 @@ class AuthRepository {
   final ApiClient _apiClient;
   final TokenStorage _tokenStorage;
 
-  Future<void> register(String email, String password) async {
-    await _authRequest('/auth/register', email, password);
+  Future<void> register({
+    required String email,
+    required String password,
+    required String firstName,
+    required String lastName,
+    required DateTime birthDate,
+  }) async {
+    await _authRequest('/auth/register', {
+      'email': email,
+      'password': password,
+      'firstName': firstName,
+      'lastName': lastName,
+      // Solo la fecha (sin hora) alcanza — evita que el offset de huso
+      // horario del dispositivo corra la fecha un día en el backend.
+      'birthDate': birthDate.toIso8601String().split('T').first,
+    });
   }
 
   Future<void> login(String email, String password) async {
-    await _authRequest('/auth/login', email, password);
+    await _authRequest('/auth/login', {'email': email, 'password': password});
   }
 
-  Future<void> _authRequest(String path, String email, String password) async {
+  Future<void> _authRequest(String path, Map<String, dynamic> data) async {
     try {
-      final response = await _apiClient.dio.post(path, data: {
-        'email': email,
-        'password': password,
-      });
+      final response = await _apiClient.dio.post(path, data: data);
       await _tokenStorage.save(
         accessToken: response.data['accessToken'] as String,
         refreshToken: response.data['refreshToken'] as String,

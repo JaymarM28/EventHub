@@ -238,14 +238,15 @@ Roadmap paso a paso (orden lógico de construcción):
    `apple-design`):
    - 9a. ✅ Auth + listado/detalle de eventos (login, ver eventos, ver zonas/precios).
    - 9b. ✅ Checkout + emisión de boleto (comprar, ver el boleto con QR recibido).
-   - 9c. ✅ Escaneo/validación de QR en tiempo real contra access-service (rol
-     STAFF/ORGANIZER; enforcement solo en el cliente por ahora, ver TODOS.md #4).
+   - 9c. ✅ Escaneo/validación de QR en tiempo real contra access-service, con
+     autorización real por evento (`EventAccess`, TODOS.md #4, resuelto —
+     el organizador da de alta a su STAFF por evento, no un rol global).
    El flujo "comprar → recibir boleto → validar en puerta" ya funciona
    end-to-end — el hito central de "todo el aplicativo funcionando" está
-   cumplido, **verificado con cámara real en un iPhone físico** (VALID y
-   ALREADY_USED confirmados). Pendiente: probar 9c en el simulador de iOS
-   (bloqueado por TODOS.md #5, no aplica a dispositivo físico) y
-   cerrar el enforcement de rol del lado del backend (TODOS.md #4).
+   cumplido, **verificado con cámara real en un iPhone físico** (VALID,
+   ALREADY_USED y FORBIDDEN confirmados). Pendiente: probar 9c en el
+   simulador de iOS (bloqueado por TODOS.md #5, no aplica a dispositivo
+   físico — el resto del flujo sí se probó ahí).
 
 **Fase opcional/stretch (después de que el flujo end-to-end del paso 9 funcione):**
 

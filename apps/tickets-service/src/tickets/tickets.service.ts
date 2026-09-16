@@ -110,6 +110,36 @@ export class TicketsService {
   }
 
   /**
+   * Lectura SIN efectos secundarios — a diferencia de `validateScan`, que
+   * marca el boleto como usado en el mismo paso en que lo consulta.
+   * access-service necesita saber a qué evento pertenece el boleto ANTES
+   * de decidir si quien escanea tiene permiso (TODOS.md #4) — si
+   * resolviéramos el evento solo dentro de `validateScan`, un escaneador
+   * NO autorizado ya habría "quemado" el boleto antes de que se le negara
+   * el acceso.
+   */
+  async peek(ticketId: string): Promise<{ id: string; zoneId: string; eventId: string; userId: string; scannedAt: Date | null }> {
+    const ticket = await this.prisma.ticket.findUnique({ where: { id: ticketId } });
+    if (!ticket) {
+      throw new NotFoundException(`Boleto ${ticketId} no existe`);
+    }
+    const zone = await this.prisma.eventZone.findUnique({ where: { id: ticket.zoneId } });
+    if (!zone) {
+      // No debería pasar — la zona se sincroniza desde events-service al
+      // crear el evento (ZonesConsumer), antes de que puedan existir
+      // boletos para ella.
+      throw new NotFoundException(`Zona ${ticket.zoneId} del boleto ${ticketId} no encontrada`);
+    }
+    return {
+      id: ticket.id,
+      zoneId: ticket.zoneId,
+      eventId: zone.eventId,
+      userId: ticket.userId,
+      scannedAt: ticket.scannedAt,
+    };
+  }
+
+  /**
    * Validación de acceso (paso 7, access-service): marca el boleto como
    * usado de forma ATÓMICA — el `updateMany` con `scannedAt: null` en el
    * where hace que solo UNA de dos peticiones concurrentes (dos molinetes

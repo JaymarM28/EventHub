@@ -13,9 +13,11 @@ class AuthState extends ChangeNotifier {
   AuthStatus status = AuthStatus.unknown;
   List<String> roles = [];
 
-  /// El escaneo de acceso (paso 9c) es solo para STAFF/ORGANIZER — no hay
-  /// enforcement de esto en el backend todavía (TODOS.md #4), así que el
-  /// bloqueo del lado del cliente es la única barrera real por ahora.
+  /// El escaneo de acceso (paso 9c) es solo para STAFF/ORGANIZER. Esto es
+  /// nada más una conveniencia de UX (ocultar el ícono a quien no lo va a
+  /// poder usar) — el enforcement real vive en access-service
+  /// (EventAccess, por evento) y rechaza con FORBIDDEN aunque alguien
+  /// llegue a la pantalla sin tener ninguno de estos roles.
   bool get canScan => roles.contains('STAFF') || roles.contains('ORGANIZER');
 
   Future<void> bootstrap() async {
@@ -32,8 +34,20 @@ class AuthState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> register(String email, String password) async {
-    await _authRepository.register(email, password);
+  Future<void> register({
+    required String email,
+    required String password,
+    required String firstName,
+    required String lastName,
+    required DateTime birthDate,
+  }) async {
+    await _authRepository.register(
+      email: email,
+      password: password,
+      firstName: firstName,
+      lastName: lastName,
+      birthDate: birthDate,
+    );
     status = AuthStatus.authenticated;
     roles = await _authRepository.currentRoles();
     notifyListeners();

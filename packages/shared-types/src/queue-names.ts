@@ -10,6 +10,7 @@ export const EVENT_TYPES = {
   EVENT_CREATED: 'event.created',
   EVENT_UPDATED: 'event.updated',
   EVENT_CANCELLED: 'event.cancelled', // fase stretch — ver Open Questions
+  EVENT_STAFF_ASSIGNED: 'event.staff-assigned',
   ORDER_PAID: 'order.paid',
   ORDER_REFUNDED: 'order.refunded', // fase stretch
   TICKET_ISSUED: 'ticket.issued',

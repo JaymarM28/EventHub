@@ -76,6 +76,9 @@ describe('AuthService', () => {
       const result = await service.register({
         email: 'a@b.com',
         password: 'password123',
+        firstName: 'Ana',
+        lastName: 'Gómez',
+        birthDate: '1990-01-01',
       });
 
       expect(result.accessToken).toBe('signed.jwt.token');
@@ -87,9 +90,52 @@ describe('AuthService', () => {
       prisma.user.findUnique.mockResolvedValue({ id: 'existing' });
 
       await expect(
-        service.register({ email: 'a@b.com', password: 'password123' }),
+        service.register({
+          email: 'a@b.com',
+          password: 'password123',
+          firstName: 'Ana',
+          lastName: 'Gómez',
+          birthDate: '1990-01-01',
+        }),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(prisma.user.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('createWithRoles', () => {
+    it('crea la cuenta con los roles dados y NO emite tokens (usada por el endpoint interno)', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.user.create.mockResolvedValue({ id: 'staff-1', email: 'staff@b.com' });
+
+      const result = await service.createWithRoles({
+        email: 'staff@b.com',
+        password: 'password123',
+        firstName: 'Luis',
+        lastName: 'Portero',
+        birthDate: '1995-01-01',
+        roles: ['STAFF'],
+      });
+
+      expect(result).toEqual({ id: 'staff-1', email: 'staff@b.com' });
+      expect(jwt.signAsync).not.toHaveBeenCalled();
+      expect(prisma.user.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ roles: ['STAFF'] }) }),
+      );
+    });
+
+    it('rechaza si el email ya existe', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'existing' });
+
+      await expect(
+        service.createWithRoles({
+          email: 'staff@b.com',
+          password: 'password123',
+          firstName: 'Luis',
+          lastName: 'Portero',
+          birthDate: '1995-01-01',
+          roles: ['STAFF'],
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
     });
   });
 

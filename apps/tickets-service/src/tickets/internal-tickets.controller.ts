@@ -1,4 +1,4 @@
-import { Controller, Param, Post } from '@nestjs/common';
+import { Controller, Get, Param, Post } from '@nestjs/common';
 import { TicketsService } from './tickets.service';
 
 /**
@@ -17,5 +17,11 @@ export class InternalTicketsController {
   @Post(':id/validate')
   validate(@Param('id') id: string) {
     return this.ticketsService.validateScan(id);
+  }
+
+  /** Solo lectura — ver el comentario en TicketsService.peek(). */
+  @Get(':id')
+  peek(@Param('id') id: string) {
+    return this.ticketsService.peek(id);
   }
 }

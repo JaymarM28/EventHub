@@ -125,7 +125,15 @@ flutter test
   (Android o iOS) no comparte red de ninguna forma — pásale la IP de LAN
   del Mac explícitamente:
   `flutter run -d <device-id> --dart-define=API_HOST=192.168.1.23`. El
-  Mac y el teléfono deben estar en la misma red wifi.
+  Mac y el teléfono deben estar en la misma red wifi — y esa IP cambia si
+  cambias de red, hay que reconsultarla (`ipconfig getifaddr en0`) y
+  relanzar. Un iPhone ya emparejado por cable una vez puede debuggearse
+  después por wifi (Xcode → Window → Devices and Simulators → tildar
+  "Connect via network" con el cable puesto, después ya no hace falta).
+- **Registro (`/auth/register`)** pide nombre, apellido, fecha de
+  nacimiento, email y contraseña — los primeros tres son nuevos (antes
+  solo email+contraseña, ver TODOS.md #4). El selector de fecha usa
+  `showDatePicker` nativo.
 - **Checkout (paso 9b):** tocar una zona abre un bottom sheet de confirmación
   (`showCheckoutSheet`); `POST /orders/checkout` solo confirma el pago — la
   emisión del boleto es asíncrona (outbox → RabbitMQ → tickets-service), así
@@ -138,16 +146,18 @@ flutter test
 - **Escaneo de acceso (paso 9c):** ícono de QR en el AppBar de `/events`
   visible solo si el JWT trae rol `STAFF` u `ORGANIZER`
   (`AuthState.canScan`, decodificado del claim `roles` — no hay endpoint
-  `/auth/me`). `app_router.dart` también bloquea `/scan` por redirect si
-  alguien llega ahí sin el rol. **Esto es solo un bloqueo del lado del
-  cliente** — `access-service` todavía no exige el rol en el backend (ver
-  TODOS.md #4), así que no reemplaza autorización real. `POST /access/scan`
-  devuelve un estado explícito por resultado (`VALID`/`ALREADY_USED`/
-  `INVALID`/`DEGRADED`, este último para cuando tickets-service no responde,
-  TODOS.md #3) — la pantalla vibra y colorea el visor en el mismo frame que
-  detecta un código, sin esperar la respuesta de red. **Verificado con
-  cámara real en un iPhone físico**: detecta el QR, marca `VALID` la
-  primera vez y `ALREADY_USED` al reescanear el mismo boleto.
+  `/auth/me`). Esto es solo UX (ocultar el ícono a quien no lo va a poder
+  usar) — el enforcement real vive en `access-service` con `EventAccess`,
+  autorización **por evento** (TODOS.md #4, resuelto): un organizador da de
+  alta a su equipo de STAFF desde `POST /events/:id/staff`, y solo esas
+  personas (más el propio organizador, autorizado automáticamente) pueden
+  escanear boletos de ESE evento — cualquier otro usuario autenticado
+  recibe `FORBIDDEN`. `POST /access/scan` devuelve un estado explícito por
+  resultado (`VALID`/`ALREADY_USED`/`INVALID`/`DEGRADED`/`FORBIDDEN`) — la
+  pantalla vibra y colorea el visor en el mismo frame que detecta un
+  código, sin esperar la respuesta de red. **Verificado con cámara real en
+  un iPhone físico**: detecta el QR, marca `VALID` la primera vez y
+  `ALREADY_USED` al reescanear el mismo boleto.
 
 **Limitación conocida: `mobile_scanner` (QR, paso 9c) no compila para el
 simulador de iOS en Mac Apple Silicon.** Los pods de Google MLKit no traen
@@ -161,6 +171,23 @@ iOS simulator solo sirve para pantallas que no toquen `mobile_scanner` una
 vez este ajuste esté resuelto del todo.
 
 ## Gotchas del monorepo
+
+**pnpm 11.x en esta máquina requiere Node 22.13+; el Node activo por
+defecto acá es 20.20.1.** Cualquier comando `pnpm` a nivel de raíz del
+workspace (`pnpm install`, `pnpm dev:infra`, o `pnpm build`/`pnpm exec`
+dentro de un servicio individual) falla con
+`Error [ERR_UNKNOWN_BUILTIN_MODULE]: No such built-in module: node:sqlite`
+bajo Node 20. Cambiar con `nvm use 22` (hay una versión 22 instalada vía
+nvm) antes de correr `pnpm install` o `./scripts/e2e-check.sh` tras
+agregar una dependencia nueva a algún `package.json`.
+
+**`./scripts/e2e-check.sh --keep-up` NO reemplaza servicios que ya están
+corriendo en su puerto** — solo hace `wait_for_port`, no mata el proceso
+viejo primero. Si dejaste servicios corriendo de una sesión anterior y
+cambiaste código, un rebuild + `--keep-up` puede compilar el `dist/` nuevo
+pero seguir sirviendo tráfico desde el proceso viejo sin que lo notes.
+Antes de un rebuild importante: `lsof -ti:3001-3010 | xargs kill` (Mac) para
+forzar que arranquen de cero.
 
 **Cada schema.prisma DEBE declarar su propio `output`.** pnpm dedupea
 `@prisma/client` a una sola ubicación física por versión resuelta — sin un

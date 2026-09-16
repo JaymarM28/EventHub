@@ -139,9 +139,9 @@ BUYER_EMAIL="buyer-e2e-$EMAIL_SUFFIX@eventhub.dev"
 
 log "Registro de organizador y comprador..."
 curl -s -X POST "$GATEWAY_URL/auth/register" -H "Content-Type: application/json" \
-  -d "{\"email\":\"$ORG_EMAIL\",\"password\":\"password123\"}" >/dev/null
+  -d "{\"email\":\"$ORG_EMAIL\",\"password\":\"password123\",\"firstName\":\"Org\",\"lastName\":\"E2E\",\"birthDate\":\"1990-01-01\"}" >/dev/null
 curl -s -X POST "$GATEWAY_URL/auth/register" -H "Content-Type: application/json" \
-  -d "{\"email\":\"$BUYER_EMAIL\",\"password\":\"password123\"}" >/dev/null
+  -d "{\"email\":\"$BUYER_EMAIL\",\"password\":\"password123\",\"firstName\":\"Buyer\",\"lastName\":\"E2E\",\"birthDate\":\"1990-01-01\"}" >/dev/null
 
 psql_q auth_db "UPDATE users SET roles = ARRAY['ORGANIZER']::\"Role\"[] WHERE email = '$ORG_EMAIL';" >/dev/null
 [ $? -eq 0 ] && ok "organizador promovido" || bad "no se pudo promover organizador"
@@ -154,9 +154,10 @@ log "Creando evento (capacidad 1, para forzar el límite)..."
 CREATE=$(curl -s -X POST "$GATEWAY_URL/events" -H "Content-Type: application/json" -H "Authorization: Bearer $ORG_TOKEN" \
   -d '{"title":"E2E Check","venue":"CI","startsAt":"2027-06-01T20:00:00.000Z","zones":[{"name":"Unica","price":10,"capacity":1}]}')
 ZONE_ID=$(echo "$CREATE" | python3 -c "import sys,json; print(json.load(sys.stdin)['zones'][0]['id'])" 2>/dev/null)
+EVENT_ID=$(echo "$CREATE" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null)
 [ -n "$ZONE_ID" ] && ok "evento creado, zona $ZONE_ID" || { bad "creación de evento falló: $CREATE"; exit 1; }
 
-sleep 2 # tiempo para que event.created se propague a tickets-service
+sleep 2 # tiempo para que event.created se propague a tickets-service (zonas) y access-service (EventAccess del organizador)
 
 log "GET /events público (sin token)..."
 PUBLIC_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$GATEWAY_URL/events")
@@ -174,7 +175,7 @@ ORDER_CODE=$(echo "$ORDER" | tail -1)
 log "GARANTÍA DURA: segundo comprador debe ser rechazado (zona agotada)..."
 BUYER2_EMAIL="buyer2-e2e-$EMAIL_SUFFIX@eventhub.dev"
 curl -s -X POST "$GATEWAY_URL/auth/register" -H "Content-Type: application/json" \
-  -d "{\"email\":\"$BUYER2_EMAIL\",\"password\":\"password123\"}" >/dev/null
+  -d "{\"email\":\"$BUYER2_EMAIL\",\"password\":\"password123\",\"firstName\":\"Buyer2\",\"lastName\":\"E2E\",\"birthDate\":\"1990-01-01\"}" >/dev/null
 BUYER2_TOKEN=$(curl -s -X POST "$GATEWAY_URL/auth/login" -H "Content-Type: application/json" \
   -d "{\"email\":\"$BUYER2_EMAIL\",\"password\":\"password123\"}" | python3 -c "import sys,json; print(json.load(sys.stdin)['accessToken'])")
 REJECT_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$GATEWAY_URL/orders/checkout" -H "Content-Type: application/json" -H "Authorization: Bearer $BUYER2_TOKEN" \
@@ -193,15 +194,24 @@ NOTIF_COUNT=$(curl -s "$GATEWAY_URL/notifications/mine" -H "Authorization: Beare
 [ "$NOTIF_COUNT" = "2" ] && ok "2 notificaciones recibidas" || bad "se esperaban 2 notificaciones, hubo $NOTIF_COUNT"
 
 if [ -n "$QR_TOKEN" ]; then
+  # El organizador escanea su PROPIO evento — TODOS.md #4: access-service
+  # ya no deja escanear a cualquier autenticado, solo a quien esté
+  # autorizado para ese evento (el organizador lo está automáticamente,
+  # sincronizado vía event.created; ver EventAccessConsumer).
   log "Escaneo de acceso: primer escaneo debe ser VALID..."
-  SCAN1=$(curl -s -X POST "$GATEWAY_URL/access/scan" -H "Content-Type: application/json" -H "Authorization: Bearer $BUYER_TOKEN" \
+  SCAN1=$(curl -s -X POST "$GATEWAY_URL/access/scan" -H "Content-Type: application/json" -H "Authorization: Bearer $ORG_TOKEN" \
     -d "{\"qrToken\":\"$QR_TOKEN\"}")
   echo "$SCAN1" | grep -q '"status":"VALID"' && ok "primer escaneo VALID" || bad "primer escaneo: $SCAN1"
 
   log "Escaneo de acceso: segundo escaneo debe ser ALREADY_USED..."
-  SCAN2=$(curl -s -X POST "$GATEWAY_URL/access/scan" -H "Content-Type: application/json" -H "Authorization: Bearer $BUYER_TOKEN" \
+  SCAN2=$(curl -s -X POST "$GATEWAY_URL/access/scan" -H "Content-Type: application/json" -H "Authorization: Bearer $ORG_TOKEN" \
     -d "{\"qrToken\":\"$QR_TOKEN\"}")
   echo "$SCAN2" | grep -q '"status":"ALREADY_USED"' && ok "segundo escaneo ALREADY_USED" || bad "segundo escaneo: $SCAN2"
+
+  log "Escaneo de acceso: un usuario SIN permiso para este evento debe ser FORBIDDEN..."
+  SCAN3=$(curl -s -X POST "$GATEWAY_URL/access/scan" -H "Content-Type: application/json" -H "Authorization: Bearer $BUYER2_TOKEN" \
+    -d "{\"qrToken\":\"$QR_TOKEN\"}")
+  echo "$SCAN3" | grep -q '"status":"FORBIDDEN"' && ok "escaneo sin permiso -> FORBIDDEN" || bad "escaneo sin permiso: $SCAN3"
 fi
 
 log "Verificando que el endpoint interno de tickets NO esté expuesto por el gateway..."
@@ -215,6 +225,7 @@ for db in auth_db events_db tickets_db orders_db notifications_db access_db; do
     events_db) psql_q "$db" "DELETE FROM zones WHERE id = '$ZONE_ID'; DELETE FROM events WHERE title = 'E2E Check';" >/dev/null ;;
     tickets_db) psql_q "$db" "DELETE FROM tickets WHERE \"zoneId\" = '$ZONE_ID'; DELETE FROM event_zones WHERE id = '$ZONE_ID';" >/dev/null ;;
     orders_db) psql_q "$db" "DELETE FROM orders WHERE \"zoneId\" = '$ZONE_ID';" >/dev/null ;;
+    access_db) psql_q "$db" "DELETE FROM event_access WHERE \"eventId\" = '$EVENT_ID';" >/dev/null ;;
     *) ;;
   esac
 done

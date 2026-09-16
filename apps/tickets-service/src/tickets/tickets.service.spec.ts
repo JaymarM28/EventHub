@@ -16,6 +16,7 @@ describe('TicketsService', () => {
       findUnique: jest.Mock;
       findUniqueOrThrow: jest.Mock;
     };
+    eventZone: { findUnique: jest.Mock };
   };
   let tx: {
     $queryRaw: jest.Mock;
@@ -46,6 +47,7 @@ describe('TicketsService', () => {
         findUnique: jest.fn(),
         findUniqueOrThrow: jest.fn(),
       },
+      eventZone: { findUnique: jest.fn() },
     };
     redis = { release: jest.fn().mockResolvedValue(undefined) };
     publisher = { publish: jest.fn().mockResolvedValue(undefined) };
@@ -169,6 +171,42 @@ describe('TicketsService', () => {
       await expect(service.validateScan('no-existe')).rejects.toBeInstanceOf(
         NotFoundException,
       );
+    });
+  });
+
+  describe('peek', () => {
+    it('resuelve el eventId del boleto SIN marcarlo como usado', async () => {
+      prisma.ticket.findUnique.mockResolvedValue({
+        id: 'ticket-1',
+        zoneId: 'zone-1',
+        userId: 'user-1',
+        scannedAt: null,
+      });
+      prisma.eventZone.findUnique.mockResolvedValue({ id: 'zone-1', eventId: 'event-1' });
+
+      const result = await service.peek('ticket-1');
+
+      expect(result).toEqual({
+        id: 'ticket-1',
+        zoneId: 'zone-1',
+        eventId: 'event-1',
+        userId: 'user-1',
+        scannedAt: null,
+      });
+      expect(prisma.ticket.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('lanza NotFoundException si el boleto no existe', async () => {
+      prisma.ticket.findUnique.mockResolvedValue(null);
+
+      await expect(service.peek('no-existe')).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('lanza NotFoundException si la zona del boleto no está sincronizada', async () => {
+      prisma.ticket.findUnique.mockResolvedValue({ id: 'ticket-1', zoneId: 'zone-huerfana', scannedAt: null });
+      prisma.eventZone.findUnique.mockResolvedValue(null);
+
+      await expect(service.peek('ticket-1')).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 });

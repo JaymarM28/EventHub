@@ -18,6 +18,6 @@ export class ScansController {
     @InternalUser() user: InternalUserContext,
     @InternalHeaders() headers: RawInternalHeaders,
   ) {
-    return this.scansService.scan(dto.qrToken, user.userId, headers);
+    return this.scansService.scan(dto.qrToken, user, headers);
   }
 }

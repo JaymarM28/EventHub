@@ -13,6 +13,25 @@ enum ScanResult {
   ALREADY_USED
   INVALID
   DEGRADED
+  FORBIDDEN
+}
+
+/// Read-model local, sincronizado desde events-service vía event.created
+/// (organizerId, autorizado automáticamente a escanear su propio evento) y
+/// event.staff-assigned (mismo patrón que EventZone en tickets-service —
+/// sin esto, el escaneo dependería en vivo de que events-service esté
+/// arriba, TODOS.md #4). Upsert por (eventId, userId) — naturalmente
+/// idempotente, no necesita ProcessedEvent (igual razonamiento que la sync
+/// de zonas, ver DESIGN.md contrato de idempotencia).
+model EventAccess {
+  id        String   @id @default(uuid())
+  eventId   String
+  userId    String
+  createdAt DateTime @default(now())
+
+  @@unique([eventId, userId])
+  @@index([eventId])
+  @@map("event_access")
 }
 
 /// Auditoría de cada intento de escaneo, válido o no (DESIGN.md paso 7:

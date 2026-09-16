@@ -64,38 +64,42 @@ escaneo devolvió `DEGRADED` con mensaje claro, y quedó registrado en
 
 ---
 
-## 4. Seguridad: rol STAFF no aplicado en access-service ni en las mutaciones de tickets-service
+## 4. ~~Seguridad: rol STAFF no aplicado en access-service~~ — RESUELTO (2026-09-15)
 
-**What:** `POST /access/scan` y `POST /internal/tickets/:id/validate` (y
-`POST /events`, `PATCH /events/:id`) no filtran por rol STAFF/ORGANIZER a
-nivel de `@Roles(...)` de forma completa — el backend sigue dejando que
-cualquier usuario autenticado escanee boletos ajenos si llama al endpoint
-directamente. La app Flutter (paso 9c) bloquea la pantalla de escaneo del
-lado del cliente (`AuthState.canScan`, `app_router.dart`) si el usuario no
-tiene STAFF/ORGANIZER en el JWT, pero eso es solo UX — no reemplaza el
-enforcement real en `access-service`.
+**Resuelto:** el organizador da de alta STAFF **por evento** (no un rol
+global) vía `POST /events/:id/staff` (ownership-checked: solo el dueño del
+evento o SUPER_ADMIN). Ese endpoint crea la cuenta en `auth-service`
+(`POST /internal/users`, nuevo, protegido por `InternalAuthGuard` +
+`@Roles('ORGANIZER','SUPER_ADMIN')` como defensa en profundidad) con los
+datos que el organizador define — incluida la contraseña, que le comunica
+al staff por fuera de la app (decisión explícita: esta app no tiene envío
+de emails real).
 
-**Why:** Los roles VENDOR/STAFF están reservados en el modelo de datos desde
-`auth-service` (paso 2) pero nunca se activó su enforcement — la premisa
-original que los dejó "reservados, no implementados" (Open Questions de
-DESIGN.md) sigue vigente y no se cerró en el paso 7.
+`events-service` guarda la relación en `EventStaff` y emite
+`event.staff-assigned`; `access-service` (que antes era 100% HTTP, sin
+consumidor RabbitMQ) ahora también consume `event.created` (autoriza
+automáticamente al organizador para su propio evento) y ese evento nuevo,
+manteniendo un read-model local `EventAccess {eventId, userId}` — mismo
+patrón que la sync de zonas en tickets-service, para que el escaneo no
+dependa en vivo de que `events-service` esté arriba.
 
-**Pros:** Cierra un gap de autorización real antes de exponer esto a
-usuarios reales.
+**Bug real encontrado al diseñar esto:** `tickets-service` marcaba el
+boleto como usado en el MISMO paso en que lo validaba — resolver el evento
+del boleto DENTRO de esa llamada habría dejado "quemar" un boleto antes de
+siquiera chequear el permiso. Se separó en dos endpoints internos: uno de
+solo lectura (`GET /internal/tickets/:id`, nuevo) para resolver el
+`eventId` ANTES de decidir autorización, y el `validate` original (que sí
+consume) solo se llama después de confirmar el permiso.
 
-**Cons:** Requiere decidir el flujo de asignación de rol STAFF (¿quién
-promueve a alguien a STAFF? ¿el organizer del evento, un admin?) — es más
-que un simple `@Roles('STAFF')`.
+`ScansService.scan()` ahora tiene un cuarto estado explícito `FORBIDDEN`
+(auditado en `ScanLog` igual que los demás) para quien no está autorizado
+para ese evento; `SUPER_ADMIN` salta el chequeo.
 
-**Context:** Relacionado con el TODO de roles VENDOR/STAFF ya documentado en
-el design doc original. Al resolver este TODO, aplicar `@Roles('STAFF',
-'SUPER_ADMIN')` en `ScansController.scan` y considerar mover la validación
-interna de tickets a requerir un rol también (hoy cualquier internal
-context autenticado puede llamarla, mitigado solo por no estar expuesta vía
-gateway).
-
-**Depends on:** Diseñar el flujo de asignación de roles (fuera de alcance
-actual, candidato a fase stretch junto con VENDOR/STAFF operativos).
+**Verificado:** organizador crea evento → agrega staff con
+`POST /events/:id/staff` → comprador compra boleto → el staff recién
+creado escanea y da `VALID` → un usuario sin relación con el evento
+escanea el mismo boleto y da `FORBIDDEN`. `scripts/e2e-check.sh` (27/27)
+incluye el caso FORBIDDEN.
 
 ---
 

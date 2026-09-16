@@ -47,6 +47,19 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
+      appBar: AppBar(
+        backgroundColor: AppColors.background,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.close_rounded),
+          // Volver a /events (no context.pop()): a esta pantalla se llega
+          // tanto con push (desde el intento de compra) como con go (desde
+          // el botón "Ingresar" de la lista), así que pop() no siempre
+          // tiene a dónde volver — /events es el único destino que
+          // siempre es válido (browsing es público).
+          onPressed: () => context.go('/events'),
+        ),
+      ),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 28),
