@@ -109,6 +109,19 @@ export class TicketsService {
     return this.prisma.ticket.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
   }
 
+  /** Boletos vendidos por zona — alimenta el dashboard del organizador
+   * (admin panel). Zonas sin ningún boleto no aparecen en el resultado;
+   * el llamador (events-service) las completa con 0. */
+  async soldCountByZone(zoneIds: string[]): Promise<{ zoneId: string; sold: number }[]> {
+    if (zoneIds.length === 0) return [];
+    const grouped = await this.prisma.ticket.groupBy({
+      by: ['zoneId'],
+      where: { zoneId: { in: zoneIds } },
+      _count: { _all: true },
+    });
+    return grouped.map((g) => ({ zoneId: g.zoneId, sold: g._count._all }));
+  }
+
   /**
    * Lectura SIN efectos secundarios — a diferencia de `validateScan`, que
    * marca el boleto como usado en el mismo paso en que lo consulta.

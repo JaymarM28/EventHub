@@ -15,6 +15,7 @@ describe('TicketsService', () => {
       updateMany: jest.Mock;
       findUnique: jest.Mock;
       findUniqueOrThrow: jest.Mock;
+      groupBy: jest.Mock;
     };
     eventZone: { findUnique: jest.Mock };
   };
@@ -46,6 +47,7 @@ describe('TicketsService', () => {
         updateMany: jest.fn(),
         findUnique: jest.fn(),
         findUniqueOrThrow: jest.fn(),
+        groupBy: jest.fn(),
       },
       eventZone: { findUnique: jest.fn() },
     };
@@ -207,6 +209,29 @@ describe('TicketsService', () => {
       prisma.eventZone.findUnique.mockResolvedValue(null);
 
       await expect(service.peek('ticket-1')).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('soldCountByZone', () => {
+    it('agrupa boletos vendidos por zona', async () => {
+      prisma.ticket.groupBy.mockResolvedValue([
+        { zoneId: 'zone-1', _count: { _all: 20 } },
+        { zoneId: 'zone-2', _count: { _all: 3 } },
+      ]);
+
+      const result = await service.soldCountByZone(['zone-1', 'zone-2']);
+
+      expect(result).toEqual([
+        { zoneId: 'zone-1', sold: 20 },
+        { zoneId: 'zone-2', sold: 3 },
+      ]);
+    });
+
+    it('devuelve [] sin consultar la base si no hay zoneIds', async () => {
+      const result = await service.soldCountByZone([]);
+
+      expect(result).toEqual([]);
+      expect(prisma.ticket.groupBy).not.toHaveBeenCalled();
     });
   });
 });

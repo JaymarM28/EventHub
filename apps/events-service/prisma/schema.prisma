@@ -49,6 +49,9 @@ model EventStaff {
   eventId   String
   event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
   userId    String // id devuelto por auth-service al crear la cuenta
+  email     String // denormalizado desde auth-service — solo para mostrar
+                    // la lista de staff en el admin panel sin otro viaje
+                    // de red; nunca es la fuente de verdad de identidad.
   createdAt DateTime @default(now())
 
   @@unique([eventId, userId])

@@ -7,6 +7,7 @@ import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { AddStaffDto } from './dto/add-staff.dto';
 import { AuthClientService } from './auth-client.service';
+import { TicketsClientService } from './tickets-client.service';
 
 @Injectable()
 export class EventsService {
@@ -14,6 +15,7 @@ export class EventsService {
     private readonly prisma: PrismaService,
     private readonly publisher: DomainEventsPublisher,
     private readonly authClient: AuthClientService,
+    private readonly ticketsClient: TicketsClientService,
   ) {}
 
   async create(dto: CreateEventDto, organizerId: string) {
@@ -47,6 +49,14 @@ export class EventsService {
     });
   }
 
+  findByOrganizer(organizerId: string) {
+    return this.prisma.event.findMany({
+      where: { organizerId },
+      include: { zones: true },
+      orderBy: { startsAt: 'asc' },
+    });
+  }
+
   async findOne(id: string) {
     const event = await this.prisma.event.findUnique({
       where: { id },
@@ -60,12 +70,7 @@ export class EventsService {
 
   async update(id: string, dto: UpdateEventDto, requester: InternalUserContext) {
     const existing = await this.findOne(id); // 404 si no existe
-
-    const isOwner = existing.organizerId === requester.userId;
-    const isSuperAdmin = requester.roles.includes('SUPER_ADMIN');
-    if (!isOwner && !isSuperAdmin) {
-      throw new ForbiddenException('Solo el organizador dueño del evento puede editarlo');
-    }
+    this.assertOwner(existing.organizerId, requester, 'editarlo');
 
     const event = await this.prisma.event.update({
       where: { id },
@@ -94,17 +99,12 @@ export class EventsService {
    */
   async addStaff(id: string, dto: AddStaffDto, requester: InternalUserContext, headers: RawInternalHeaders) {
     const existing = await this.findOne(id); // 404 si no existe
-
-    const isOwner = existing.organizerId === requester.userId;
-    const isSuperAdmin = requester.roles.includes('SUPER_ADMIN');
-    if (!isOwner && !isSuperAdmin) {
-      throw new ForbiddenException('Solo el organizador dueño del evento puede agregar staff');
-    }
+    this.assertOwner(existing.organizerId, requester, 'agregar staff');
 
     const createdUser = await this.authClient.createStaffUser(dto, headers);
 
     const eventStaff = await this.prisma.eventStaff.create({
-      data: { eventId: id, userId: createdUser.id },
+      data: { eventId: id, userId: createdUser.id, email: createdUser.email },
     });
 
     await this.publisher.publish(EVENT_TYPES.EVENT_STAFF_ASSIGNED, {
@@ -112,6 +112,60 @@ export class EventsService {
       userId: createdUser.id,
     });
 
-    return { id: eventStaff.id, eventId: id, userId: createdUser.id, email: createdUser.email };
+    return eventStaff;
+  }
+
+  async listStaff(id: string, requester: InternalUserContext) {
+    const existing = await this.findOne(id); // 404 si no existe
+    this.assertOwner(existing.organizerId, requester, 'ver su staff');
+
+    return this.prisma.eventStaff.findMany({
+      where: { eventId: id },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  /**
+   * Ventas/aforo por zona para el admin panel (fase stretch de DESIGN.md).
+   * `sold` viene de tickets-service (fuente de verdad de boletos emitidos)
+   * — events-service solo conoce la capacidad. El ingreso se aproxima como
+   * `precio × vendidos` (no hay reembolsos todavía, ver TODOS.md #13), en
+   * vez de sumar montos reales de orders-service — evita una tercera
+   * dependencia síncrona solo para este dashboard.
+   */
+  async dashboard(id: string, requester: InternalUserContext) {
+    const existing = await this.findOne(id); // 404 si no existe
+    this.assertOwner(existing.organizerId, requester, 'ver su dashboard');
+
+    const sales = await this.ticketsClient.soldCountByZone(existing.zones.map((z) => z.id));
+    const soldByZone = new Map(sales.map((s) => [s.zoneId, s.sold]));
+
+    const zones = existing.zones.map((zone) => {
+      const sold = soldByZone.get(zone.id) ?? 0;
+      return {
+        zoneId: zone.id,
+        name: zone.name,
+        price: zone.price,
+        capacity: zone.capacity,
+        sold,
+        revenue: Number(zone.price) * sold,
+      };
+    });
+
+    return {
+      eventId: id,
+      zones,
+      totalCapacity: zones.reduce((sum, z) => sum + z.capacity, 0),
+      totalSold: zones.reduce((sum, z) => sum + z.sold, 0),
+      totalRevenue: zones.reduce((sum, z) => sum + z.revenue, 0),
+    };
+  }
+
+  private assertOwner(organizerId: string, requester: InternalUserContext, action: string): void {
+    const isOwner = organizerId === requester.userId;
+    const isSuperAdmin = requester.roles.includes('SUPER_ADMIN');
+    if (!isOwner && !isSuperAdmin) {
+      throw new ForbiddenException(`Solo el organizador dueño del evento puede ${action}`);
+    }
   }
 }

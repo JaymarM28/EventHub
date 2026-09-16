@@ -28,10 +28,31 @@ export class EventsController {
     return this.eventsService.findAll();
   }
 
+  // Debe declararse ANTES de `:id` — Nest resuelve rutas en orden de
+  // declaración, así que un `:id` ya registrado capturaría "mine" como si
+  // fuera el id de un evento.
+  @Get('mine')
+  @Roles('ORGANIZER', 'SUPER_ADMIN')
+  findMine(@InternalUser() user: InternalUserContext) {
+    return this.eventsService.findByOrganizer(user.userId);
+  }
+
   @Get(':id')
   @Public()
   findOne(@Param('id') id: string) {
     return this.eventsService.findOne(id);
+  }
+
+  @Get(':id/dashboard')
+  @Roles('ORGANIZER', 'SUPER_ADMIN')
+  dashboard(@Param('id') id: string, @InternalUser() user: InternalUserContext) {
+    return this.eventsService.dashboard(id, user);
+  }
+
+  @Get(':id/staff')
+  @Roles('ORGANIZER', 'SUPER_ADMIN')
+  listStaff(@Param('id') id: string, @InternalUser() user: InternalUserContext) {
+    return this.eventsService.listStaff(id, user);
   }
 
   @Patch(':id')
