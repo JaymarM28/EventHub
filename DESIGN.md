@@ -250,9 +250,13 @@ Roadmap paso a paso (orden lógico de construcción):
 
 **Fase opcional/stretch (después de que el flujo end-to-end del paso 9 funcione):**
 
-10. **admin panel web** (mini-diseño propio): dashboard de organizador con
-    ventas/aforo en vivo. Requiere su propia sesión de diseño cuando se llegue aquí
-    (decidir WebSocket vs. polling, qué eventos alimentan el dashboard).
+10. ✅ **admin panel web** (`apps/admin-panel`, React + Vite + TypeScript) —
+    ciclo de vida completo del organizador: crear/editar eventos, agregar y
+    editar zonas (con piso de capacidad = lo ya vendido, nunca se puede
+    bajar por debajo), gestionar STAFF, y ventas/aforo **en vivo** por
+    WebSocket real (decisión tomada con el usuario: WebSocket sobre
+    polling — ver api-gateway/src/dashboard, primera vez que api-gateway
+    deja de ser proxy HTTP puro). Verificado end-to-end.
 11. **ai-service** (Python/FastAPI): recomendaciones y chatbot de soporte. Se separa
     del flujo core porque no enseña el patrón central de microservicios (mensajería/
     orquestación) y añade un stack adicional — vale la pena para practicar

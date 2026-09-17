@@ -11,6 +11,7 @@ import { EventsService } from './events.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { AddStaffDto } from './dto/add-staff.dto';
+import { CreateZoneDto, UpdateZoneDto } from './dto/zone.dto';
 
 @Controller('events')
 export class EventsController {
@@ -74,5 +75,22 @@ export class EventsController {
     @InternalHeaders() headers: RawInternalHeaders,
   ) {
     return this.eventsService.addStaff(id, dto, user, headers);
+  }
+
+  @Post(':id/zones')
+  @Roles('ORGANIZER', 'SUPER_ADMIN')
+  addZone(@Param('id') id: string, @Body() dto: CreateZoneDto, @InternalUser() user: InternalUserContext) {
+    return this.eventsService.addZone(id, dto, user);
+  }
+
+  @Patch(':id/zones/:zoneId')
+  @Roles('ORGANIZER', 'SUPER_ADMIN')
+  updateZone(
+    @Param('id') id: string,
+    @Param('zoneId') zoneId: string,
+    @Body() dto: UpdateZoneDto,
+    @InternalUser() user: InternalUserContext,
+  ) {
+    return this.eventsService.updateZone(id, zoneId, dto, user);
   }
 }

@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InternalUserContext, RawInternalHeaders } from '@event-hub/internal-auth';
 import { EVENT_TYPES } from '@event-hub/shared-types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -6,6 +6,7 @@ import { DomainEventsPublisher } from '../messaging/domain-events.publisher';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { AddStaffDto } from './dto/add-staff.dto';
+import { CreateZoneDto, UpdateZoneDto } from './dto/zone.dto';
 import { AuthClientService } from './auth-client.service';
 import { TicketsClientService } from './tickets-client.service';
 
@@ -159,6 +160,64 @@ export class EventsService {
       totalSold: zones.reduce((sum, z) => sum + z.sold, 0),
       totalRevenue: zones.reduce((sum, z) => sum + z.revenue, 0),
     };
+  }
+
+  /**
+   * Nueva zona para un evento ya publicado (admin panel). No requiere
+   * chequear vendidos — una zona nueva siempre empieza en 0.
+   */
+  async addZone(id: string, dto: CreateZoneDto, requester: InternalUserContext) {
+    const existing = await this.findOne(id); // 404 si no existe
+    this.assertOwner(existing.organizerId, requester, 'agregar zonas');
+
+    await this.prisma.zone.create({
+      data: { eventId: id, name: dto.name, price: dto.price, capacity: dto.capacity },
+    });
+
+    const event = await this.findOne(id);
+    await this.publisher.publish(EVENT_TYPES.EVENT_UPDATED, event);
+    return event;
+  }
+
+  /**
+   * Nombre y precio se editan libres — no afectan boletos ya emitidos,
+   * solo ventas futuras. La capacidad es la única regla real: nunca puede
+   * bajar de lo ya vendido (tickets-service es la fuente de verdad de
+   * cuántos boletos existen de esa zona) — bajarla rompería la garantía
+   * dura contra sobreventa (SELECT...FOR UPDATE en tickets-service, ver
+   * DESIGN.md premisa 6). Subirla, o dejarla igual, siempre es seguro.
+   */
+  async updateZone(id: string, zoneId: string, dto: UpdateZoneDto, requester: InternalUserContext) {
+    const existing = await this.findOne(id); // 404 si no existe
+    this.assertOwner(existing.organizerId, requester, 'editar sus zonas');
+
+    const zone = existing.zones.find((z) => z.id === zoneId);
+    if (!zone) {
+      throw new NotFoundException(`Zona ${zoneId} no encontrada en este evento`);
+    }
+
+    if (dto.capacity !== undefined) {
+      const [sales] = await this.ticketsClient.soldCountByZone([zoneId]);
+      const sold = sales?.sold ?? 0;
+      if (dto.capacity < sold) {
+        throw new BadRequestException(
+          `No se puede bajar la capacidad a ${dto.capacity} — ya se vendieron ${sold} boletos de esta zona`,
+        );
+      }
+    }
+
+    await this.prisma.zone.update({
+      where: { id: zoneId },
+      data: {
+        ...(dto.name !== undefined && { name: dto.name }),
+        ...(dto.price !== undefined && { price: dto.price }),
+        ...(dto.capacity !== undefined && { capacity: dto.capacity }),
+      },
+    });
+
+    const event = await this.findOne(id);
+    await this.publisher.publish(EVENT_TYPES.EVENT_UPDATED, event);
+    return event;
   }
 
   private assertOwner(organizerId: string, requester: InternalUserContext, action: string): void {

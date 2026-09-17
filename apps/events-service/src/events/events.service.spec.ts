@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { InternalUserContext } from '@event-hub/internal-auth';
 import { EventsService } from './events.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -21,6 +21,10 @@ describe('EventsService', () => {
     eventStaff: {
       create: jest.Mock;
       findMany: jest.Mock;
+    };
+    zone: {
+      create: jest.Mock;
+      update: jest.Mock;
     };
   };
   let publisher: { publish: jest.Mock };
@@ -55,6 +59,10 @@ describe('EventsService', () => {
       eventStaff: {
         create: jest.fn(),
         findMany: jest.fn(),
+      },
+      zone: {
+        create: jest.fn(),
+        update: jest.fn(),
       },
     };
     publisher = { publish: jest.fn().mockResolvedValue(undefined) };
@@ -259,6 +267,88 @@ describe('EventsService', () => {
       prisma.event.findUnique.mockResolvedValue({ id: 'ev-1', organizerId: organizer.userId, zones: [] });
 
       await expect(service.dashboard('ev-1', otherOrganizer)).rejects.toBeInstanceOf(ForbiddenException);
+    });
+  });
+
+  describe('addZone', () => {
+    it('crea la zona y publica event.updated con el evento completo', async () => {
+      prisma.event.findUnique.mockResolvedValue({ id: 'ev-1', organizerId: organizer.userId, zones: [] });
+      prisma.zone.create.mockResolvedValue({ id: 'zone-new' });
+
+      await service.addZone('ev-1', { name: 'VIP', price: 100, capacity: 20 }, organizer);
+
+      expect(prisma.zone.create).toHaveBeenCalledWith({
+        data: { eventId: 'ev-1', name: 'VIP', price: 100, capacity: 20 },
+      });
+      expect(publisher.publish).toHaveBeenCalledWith('event.updated', expect.objectContaining({ id: 'ev-1' }));
+    });
+
+    it('rechaza a quien no es dueño del evento', async () => {
+      prisma.event.findUnique.mockResolvedValue({ id: 'ev-1', organizerId: organizer.userId, zones: [] });
+
+      await expect(
+        service.addZone('ev-1', { name: 'VIP', price: 100, capacity: 20 }, otherOrganizer),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.zone.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('updateZone', () => {
+    const existingWithZone = {
+      id: 'ev-1',
+      organizerId: organizer.userId,
+      zones: [{ id: 'zone-1', name: 'General', price: 50, capacity: 100 }],
+    };
+
+    it('permite subir la capacidad libremente', async () => {
+      prisma.event.findUnique.mockResolvedValue(existingWithZone);
+      ticketsClient.soldCountByZone.mockResolvedValue([{ zoneId: 'zone-1', sold: 80 }]);
+
+      await service.updateZone('ev-1', 'zone-1', { capacity: 150 }, organizer);
+
+      expect(prisma.zone.update).toHaveBeenCalledWith({
+        where: { id: 'zone-1' },
+        data: { capacity: 150 },
+      });
+    });
+
+    it('GARANTÍA: rechaza bajar la capacidad por debajo de lo ya vendido', async () => {
+      prisma.event.findUnique.mockResolvedValue(existingWithZone);
+      ticketsClient.soldCountByZone.mockResolvedValue([{ zoneId: 'zone-1', sold: 80 }]);
+
+      await expect(service.updateZone('ev-1', 'zone-1', { capacity: 50 }, organizer)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(prisma.zone.update).not.toHaveBeenCalled();
+    });
+
+    it('permite editar nombre/precio sin consultar vendidos', async () => {
+      prisma.event.findUnique.mockResolvedValue(existingWithZone);
+
+      await service.updateZone('ev-1', 'zone-1', { name: 'General renombrada', price: 60 }, organizer);
+
+      expect(ticketsClient.soldCountByZone).not.toHaveBeenCalled();
+      expect(prisma.zone.update).toHaveBeenCalledWith({
+        where: { id: 'zone-1' },
+        data: { name: 'General renombrada', price: 60 },
+      });
+    });
+
+    it('lanza NotFoundException si la zona no pertenece a este evento', async () => {
+      prisma.event.findUnique.mockResolvedValue(existingWithZone);
+
+      await expect(service.updateZone('ev-1', 'zone-inexistente', { price: 10 }, organizer)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('rechaza a quien no es dueño del evento', async () => {
+      prisma.event.findUnique.mockResolvedValue(existingWithZone);
+
+      await expect(
+        service.updateZone('ev-1', 'zone-1', { price: 10 }, otherOrganizer),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.zone.update).not.toHaveBeenCalled();
     });
   });
 });

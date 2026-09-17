@@ -170,6 +170,41 @@ emulator o en un iPhone/Android físico** (ambos confirmados funcionando);
 iOS simulator solo sirve para pantallas que no toquen `mobile_scanner` una
 vez este ajuste esté resuelto del todo.
 
+## Admin panel (`apps/admin-panel`)
+
+Panel web del organizador — React + Vite + TypeScript, fase stretch de
+DESIGN.md (#10). No usa Flutter porque es una herramienta interna de
+escritorio, no una app para instalar.
+
+```bash
+cd apps/admin-panel
+pnpm install
+pnpm dev   # http://localhost:5173
+```
+
+- **Login** con una cuenta que ya tenga rol `ORGANIZER` — hoy ese rol se
+  sigue asignando a mano (`UPDATE users SET roles = ...` en `auth_db`, ver
+  el resto de este README para el patrón), no hay flujo de autopromoción.
+- **Mis eventos**: listado (`GET /events/mine`, nuevo — antes solo existía
+  el listado público completo) + formulario de creación con zonas
+  dinámicas.
+- **Detalle de evento**: editar título/lugar/descripción/fecha; agregar
+  zonas nuevas y editar nombre/precio/capacidad de las existentes (la
+  capacidad nunca puede bajar de lo ya vendido — ver
+  `EventsService.updateZone`); dar de alta STAFF para el control de acceso
+  de ese evento específico (TODOS.md #4).
+- **Ventas/aforo en vivo**: se conecta por WebSocket (`socket.io-client`)
+  al namespace `/dashboard` de api-gateway y se une a la sala de ese
+  evento — cuando alguien compra un boleto en cualquier parte (app móvil,
+  curl, lo que sea), el dashboard se refresca solo, sin recargar la
+  página. Es la primera vez que api-gateway deja de ser un proxy HTTP
+  puro: gana un WebSocket y un consumidor de RabbitMQ
+  (`apps/api-gateway/src/dashboard/`).
+- Auth por `localStorage` + JWT (sin refresh automático, a diferencia de
+  la app Flutter) — sesión de 15 minutos, después vuelve a `/login`. Es
+  una herramienta interna de sesión corta, no vale la pena la complejidad
+  de rotar tokens en silencio acá.
+
 ## Gotchas del monorepo
 
 **pnpm 11.x en esta máquina requiere Node 22.13+; el Node activo por
@@ -249,8 +284,9 @@ Ver el detalle completo en `DESIGN.md` — resumen de los primeros pasos:
 6. notifications-service.
 7. access-service.
 8. Checkpoint end-to-end con curl/Postman.
-9. Flutter app: 9a ✅ auth/eventos, 9b ✅ checkout + boleto con QR (ambos
-   probados en Android emulator contra el backend real). 9c escaneo QR —
-   pendiente.
+9. Flutter app: 9a ✅ auth/eventos, 9b ✅ checkout + boleto con QR, 9c ✅
+   escaneo de acceso con autorización real por evento — los tres
+   verificados en dispositivo físico (Android y/o iPhone).
 
-Fase opcional/stretch: admin panel web, ai-service, Kubernetes, reembolsos.
+Fase opcional/stretch: 10. ✅ admin panel web. 11. ai-service, 12.
+Kubernetes, 13. reembolsos — pendientes.

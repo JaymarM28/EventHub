@@ -1,11 +1,12 @@
 import { IsDateString, IsOptional, IsString } from 'class-validator';
 
 /**
- * No incluye `zones` — cambiar el inventario de zonas de un evento ya
- * publicado es una operación con implicaciones de negocio (¿qué pasa con
- * los boletos ya vendidos de una zona eliminada?) que se maneja aparte
- * cuando exista tickets-service (paso 5). Por ahora, actualizar zonas
- * requiere crear un evento nuevo.
+ * No incluye `zones` — editar/agregar zonas tiene sus propios endpoints
+ * (POST/PATCH /events/:id/zones, ver EventsService.addZone/updateZone)
+ * porque la regla de negocio es distinta a un campo de texto: la
+ * capacidad nunca puede bajar de lo ya vendido. Borrar una zona no está
+ * soportado todavía (decisión explícita, admin panel v1) — si ya tiene
+ * boletos vendidos dejaría boletos huérfanos.
  */
 export class UpdateEventDto {
   @IsOptional()
