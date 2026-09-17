@@ -135,3 +135,24 @@ queda limitado únicamente al simulador de iOS, no bloquea nada más.
 
 **Depends on:** Paso 9c (escaneo de QR) del roadmap.
 
+
+---
+
+## 6. Calidad de código: Prettier + ESLint compartido entre los 10 packages
+
+**What:** Cada servicio quedó con el estilo/lint que trajo su scaffold de
+NestJS (reglas básicas del CLI, sin Prettier configurado a nivel de
+monorepo). No hay formato consistente entre los 10 packages ni reglas de
+lint más allá de lo mínimo.
+
+**Why:** Se decidió explícitamente posponerlo (2026-09-16) al arrancar la
+profesionalización del proyecto — se priorizó primero CI/CD, Dockerizar
+los 7 servicios, y documentación de API (OpenAPI/Swagger).
+
+**Context:** Cuando se retome: un `.prettierrc` + `eslint.config.js` en la
+raíz del workspace, extendido (no reemplazado) por cada servicio si
+necesita reglas propias. Considerar agregarlo como paso del pipeline de
+CI/CD una vez que exista (TODOS.md — profesionalización 2026-09-16), para
+que el formato se valide automáticamente en cada push.
+
+**Depends on:** Nada bloqueante — se puede hacer en cualquier momento.

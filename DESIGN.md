@@ -263,8 +263,57 @@ Roadmap paso a paso (orden lógico de construcción):
     comunicación poliglota, pero no debe bloquear el aprendizaje principal.
 12. **Kubernetes**: una vez todo funcione en Docker Compose, migrar a manifiestos K8s
     como aprendizaje adicional.
-13. **Reembolsos/cancelaciones**: `event.cancelled` → `order.refunded` → reversión
-    de boleto, si se decide que entra en el alcance (ver Open Questions).
+13. ~~Reembolsos/cancelaciones~~ — absorbido dentro de la Fase D de negocio
+    abajo (item 22), depende de que exista un pago real que reembolsar.
+
+**Fase de features de negocio (decidida con el usuario, 2026-09-16 —
+orden por dependencia real, no por importancia):**
+
+*Fase A — cambio de modelo de datos primero, antes de construir nada encima:*
+
+14. **Comprar varios boletos en una sola orden**: hoy el checkout es 1
+    orden = 1 boleto. Cambiar esto DESPUÉS de construir pagos/reembolsos/
+    payouts obligaría a rehacer esa lógica — se hace primero a propósito.
+
+*Fase B — infraestructura de comunicación real (base técnica de lo que sigue):*
+
+15. **Notificaciones reales**: reemplazar el envío simulado de
+    notifications-service por un proveedor de email de verdad (Resend/
+    SendGrid/Postmark) — al comprador (confirmación de compra, boleto) y
+    al organizador (aviso de venta nueva).
+16. **Verificación de email** al registrarse — depende de #15 (hay que
+    poder mandar el correo).
+17. **Recuperación de contraseña** — depende de #15, mismo módulo de auth
+    que #16, se hacen juntas.
+
+*Fase C — ganancias rápidas, sin dependencias, buen respiro antes de la fase D:*
+
+18. **Mapas de las locaciones** del evento (geocoding + embed de mapa).
+19. **Búsqueda y filtros de eventos** (ciudad, fecha, categoría, precio).
+
+*Fase D — dinero real:*
+
+20. **Pagos reales** con un proveedor que ofrezca sandbox (Stripe es el
+    candidato natural). Es el ítem más grande de todos.
+21. **Payouts al organizador** (Stripe Connect) — depende de #20, no hay
+    qué pagarle al organizador sin dinero real entrando primero.
+22. **Reembolsos/cancelaciones** (`event.cancelled` → `order.refunded` →
+    reversión de boleto) — depende de #20 (no hay qué reembolsar sin un
+    pago real) y de #14 (una orden con varios boletos complica un
+    reembolso parcial).
+23. **Códigos de descuento/promociones** — depende de #20, se aplican
+    sobre el monto real cobrado.
+
+*Fase E — pulido final:*
+
+24. **Pase de Apple/Google Wallet** para el boleto, adicional al QR
+    in-app — reusa el mismo `qrToken` firmado que ya existe. Apple Wallet
+    requiere cuenta de Apple Developer paga ($99/año).
+25. **Transferencia de boleto** entre usuarios — más simple una vez el
+    modelo de #14 (varios boletos por orden) esté asentado.
+26. **Rate limiting en el checkout** — se protege la versión FINAL del
+    checkout (después de #14/#20/#23), no una intermedia que todavía va a
+    cambiar. Relacionado con el TODO #1 de lock contention en Redis.
 
 ## What I noticed about how you think
 
