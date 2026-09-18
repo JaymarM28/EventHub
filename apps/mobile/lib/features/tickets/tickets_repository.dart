@@ -21,21 +21,25 @@ class TicketsRepository {
         .toList();
   }
 
-  /// Sondea `/tickets/mine` hasta encontrar el boleto de [orderId], con un
-  /// intervalo corto — el consumidor de RabbitMQ suele procesar el evento
-  /// en milisegundos, pero nunca hay que dejar la UI "congelada" sin
-  /// feedback si tarda (DESIGN_SYSTEM.md §12, paso 9c usa la misma idea).
-  Future<TicketModel> pollForTicket(
-    String orderId, {
+  /// Sondea `/tickets/mine` hasta encontrar los `expectedCount` boletos de
+  /// [orderId] (Fase A: una orden puede emitir varios), con un intervalo
+  /// corto — el consumidor de RabbitMQ suele procesar el evento en
+  /// milisegundos, pero nunca hay que dejar la UI "congelada" sin feedback
+  /// si tarda (DESIGN_SYSTEM.md §12, paso 9c usa la misma idea). Los
+  /// `quantity` boletos de una orden se crean en la MISMA transacción de
+  /// tickets-service, así que en la práctica aparecen todos juntos o
+  /// ninguno — el loop es defensivo, no el caso esperado.
+  Future<List<TicketModel>> pollForTickets(
+    String orderId,
+    int expectedCount, {
     Duration interval = const Duration(seconds: 1),
     Duration timeout = const Duration(seconds: 15),
   }) async {
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
       final tickets = await findMine();
-      for (final ticket in tickets) {
-        if (ticket.orderId == orderId) return ticket;
-      }
+      final matching = tickets.where((t) => t.orderId == orderId).toList();
+      if (matching.length >= expectedCount) return matching;
       await Future.delayed(interval);
     }
     throw TicketNotReadyException();

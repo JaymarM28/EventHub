@@ -271,9 +271,17 @@ orden por dependencia real, no por importancia):**
 
 *Fase A — cambio de modelo de datos primero, antes de construir nada encima:*
 
-14. **Comprar varios boletos en una sola orden**: hoy el checkout es 1
+14. ✅ **Comprar varios boletos en una sola orden**: hoy el checkout es 1
     orden = 1 boleto. Cambiar esto DESPUÉS de construir pagos/reembolsos/
     payouts obligaría a rehacer esa lógica — se hace primero a propósito.
+    Tope de 10 boletos por orden (validado en front y en el DTO del
+    backend). Semáforo de Redis (soft hold) ahora cuenta boletos, no
+    reservas — una reserva de 4 ocupa 4 cupos, no 1. Garantía dura en
+    tickets-service verificada con el caso "alcanza para algunos boletos
+    de la orden pero no para todos" (nunca emite solo la mitad). App
+    Flutter: selector de cantidad en el sheet de compra, y la pantalla del
+    boleto pasa a un `PageView` cuando hay más de uno. Verificado
+    end-to-end (`scripts/e2e-check.sh`, 29/29) y en un iPhone físico.
 
 *Fase B — infraestructura de comunicación real (base técnica de lo que sigue):*
 
@@ -304,14 +312,23 @@ orden por dependencia real, no por importancia):**
 23. **Códigos de descuento/promociones** — depende de #20, se aplican
     sobre el monto real cobrado.
 
-*Fase E — pulido final:*
+*Fase E — gestión de boletos y pulido final:*
 
-24. **Pase de Apple/Google Wallet** para el boleto, adicional al QR
+24. **Pantalla "Mis boletos"** (app Flutter) — hoy un boleto solo se ve en
+    el momento de comprarlo; al cerrar esa pantalla no hay forma de
+    volver a verlo, aunque `GET /tickets/mine` ya lo tiene guardado.
+    Fundacional para todo lo que sigue en esta fase — no tiene sentido
+    transferir o asignar un boleto desde una pantalla que no existe.
+25. **Transferencia de boleto** entre usuarios — depende de #24 y de #14
+    (varios boletos por orden, ya resuelto).
+26. **Asignar boletos de una compra grupal** — si compraste 4 para ir con
+    amigos, ponerle el nombre de cada amigo a cada boleto. Más liviano que
+    #25: no cambia el dueño de la cuenta, solo una etiqueta visual sobre
+    cuál boleto es de quién. Mismo módulo que #25, depende de #24.
+27. **Pase de Apple/Google Wallet** para el boleto, adicional al QR
     in-app — reusa el mismo `qrToken` firmado que ya existe. Apple Wallet
     requiere cuenta de Apple Developer paga ($99/año).
-25. **Transferencia de boleto** entre usuarios — más simple una vez el
-    modelo de #14 (varios boletos por orden) esté asentado.
-26. **Rate limiting en el checkout** — se protege la versión FINAL del
+28. **Rate limiting en el checkout** — se protege la versión FINAL del
     checkout (después de #14/#20/#23), no una intermedia que todavía va a
     cambiar. Relacionado con el TODO #1 de lock contention en Redis.
 

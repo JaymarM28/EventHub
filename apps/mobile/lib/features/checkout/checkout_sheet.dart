@@ -7,13 +7,18 @@ import '../tickets/ticket_models.dart';
 import '../tickets/tickets_repository.dart';
 import 'orders_repository.dart';
 
-enum _Status { idle, payingOrder, waitingTicket, error }
+enum _Status { idle, payingOrder, waitingTickets, error }
 
-/// Sheet de confirmación de compra. Se cierra con `Navigator.pop(ticket)`
-/// cuando la compra + emisión del boleto termina bien — quien lo abrió
-/// (event_detail_screen) decide qué hacer con el resultado (navegar al
-/// boleto). Esto evita depender del context del sheet, que deja de existir
-/// una vez cerrado.
+/// Tope de boletos por orden — debe coincidir con el `@Max(10)` de
+/// CreateOrderDto en orders-service; UI y backend validan lo mismo por
+/// separado a propósito (la UI nunca es la única barrera).
+const _maxQuantityPerOrder = 10;
+
+/// Sheet de confirmación de compra. Se cierra con `Navigator.pop(tickets)`
+/// cuando la compra + emisión de TODOS los boletos termina bien (Fase A:
+/// varios boletos por orden) — quien lo abrió (event_detail_screen)
+/// decide qué hacer con el resultado. Esto evita depender del context del
+/// sheet, que deja de existir una vez cerrado.
 class CheckoutSheet extends StatefulWidget {
   const CheckoutSheet({super.key, required this.event, required this.zone});
 
@@ -27,6 +32,12 @@ class CheckoutSheet extends StatefulWidget {
 class _CheckoutSheetState extends State<CheckoutSheet> {
   _Status _status = _Status.idle;
   String? _error;
+  int _quantity = 1;
+
+  int get _maxQuantity {
+    final capacityCap = widget.zone.capacity.clamp(1, _maxQuantityPerOrder);
+    return capacityCap;
+  }
 
   Future<void> _buy() async {
     setState(() {
@@ -36,12 +47,12 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
     final ordersRepository = context.read<OrdersRepository>();
     final ticketsRepository = context.read<TicketsRepository>();
     try {
-      final order = await ordersRepository.checkout(widget.zone.id);
+      final order = await ordersRepository.checkout(widget.zone.id, _quantity);
       if (!mounted) return;
-      setState(() => _status = _Status.waitingTicket);
-      final ticket = await ticketsRepository.pollForTicket(order.id);
+      setState(() => _status = _Status.waitingTickets);
+      final tickets = await ticketsRepository.pollForTickets(order.id, _quantity);
       if (!mounted) return;
-      Navigator.of(context).pop(ticket);
+      Navigator.of(context).pop(tickets);
     } on CheckoutException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -59,7 +70,8 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final busy = _status == _Status.payingOrder || _status == _Status.waitingTicket;
+    final busy = _status == _Status.payingOrder || _status == _Status.waitingTickets;
+    final total = widget.zone.price * _quantity;
     return Padding(
       padding: EdgeInsets.only(
         left: 24,
@@ -85,10 +97,22 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
           const SizedBox(height: 20),
           Row(
             children: [
+              Text('Cantidad', style: Theme.of(context).textTheme.bodyLarge),
+              const Spacer(),
+              _QuantityStepper(
+                value: _quantity,
+                max: _maxQuantity,
+                onChanged: busy ? null : (v) => setState(() => _quantity = v),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
               Text('Total', style: Theme.of(context).textTheme.bodyLarge),
               const Spacer(),
               Text(
-                '\$${widget.zone.price.toStringAsFixed(0)}',
+                '\$${total.toStringAsFixed(0)}',
                 style: const TextStyle(color: AppColors.accent, fontSize: 24, fontWeight: FontWeight.w700),
               ),
             ],
@@ -105,7 +129,11 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
                 ),
                 const SizedBox(width: 12),
                 Text(
-                  _status == _Status.payingOrder ? 'Procesando pago…' : 'Emitiendo tu boleto…',
+                  _status == _Status.payingOrder
+                      ? 'Procesando pago…'
+                      : _quantity > 1
+                          ? 'Emitiendo tus boletos…'
+                          : 'Emitiendo tu boleto…',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
               ],
@@ -127,8 +155,60 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
   }
 }
 
-Future<TicketModel?> showCheckoutSheet(BuildContext context, {required EventModel event, required ZoneModel zone}) {
-  return showModalBottomSheet<TicketModel>(
+class _QuantityStepper extends StatelessWidget {
+  const _QuantityStepper({required this.value, required this.max, required this.onChanged});
+
+  final int value;
+  final int max;
+  final void Function(int)? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _StepperButton(icon: Icons.remove_rounded, onTap: value > 1 && onChanged != null ? () => onChanged!(value - 1) : null),
+        SizedBox(
+          width: 32,
+          child: Text('$value', textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleLarge),
+        ),
+        _StepperButton(icon: Icons.add_rounded, onTap: value < max && onChanged != null ? () => onChanged!(value + 1) : null),
+      ],
+    );
+  }
+}
+
+class _StepperButton extends StatelessWidget {
+  const _StepperButton({required this.icon, required this.onTap});
+
+  final IconData icon;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: enabled ? AppColors.accentSoft : AppColors.border,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        alignment: Alignment.center,
+        child: Icon(icon, size: 18, color: enabled ? AppColors.accent : AppColors.inkSoft),
+      ),
+    );
+  }
+}
+
+Future<List<TicketModel>?> showCheckoutSheet(
+  BuildContext context, {
+  required EventModel event,
+  required ZoneModel zone,
+}) {
+  return showModalBottomSheet<List<TicketModel>>(
     context: context,
     isScrollControlled: true,
     backgroundColor: AppColors.surface,

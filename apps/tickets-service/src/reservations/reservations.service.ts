@@ -29,7 +29,7 @@ export class ReservationsService {
     this.ttlMs = ttlMinutes * 60_000;
   }
 
-  async reserve(zoneId: string, userId: string) {
+  async reserve(zoneId: string, userId: string, quantity: number) {
     const zone = await this.prisma.eventZone.findUnique({ where: { id: zoneId } });
     if (!zone) {
       throw new NotFoundException(`Zona ${zoneId} no encontrada`);
@@ -38,19 +38,20 @@ export class ReservationsService {
     const confirmedCount = await this.prisma.ticket.count({ where: { zoneId } });
     const maxAvailable = zone.capacity - confirmedCount;
 
-    if (maxAvailable <= 0) {
+    if (maxAvailable < quantity) {
       throw new ConflictException('Zona agotada');
     }
 
-    const hold = await this.redis.tryReserve(zoneId, userId, maxAvailable, this.ttlMs);
+    const hold = await this.redis.tryReserve(zoneId, userId, quantity, maxAvailable, this.ttlMs);
     if (!hold) {
       throw new ConflictException('Zona agotada (reservas activas en curso)');
     }
 
-    // Incluir el precio evita que orders-service tenga que llamar a
-    // events-service por separado solo para calcular el monto a cobrar —
-    // tickets-service ya tiene su propia copia sincronizada (ZonesConsumer).
-    return { ...hold, zoneId, price: Number(zone.price) };
+    // Precio UNITARIO — orders-service multiplica por la cantidad. Incluir
+    // esto evita que orders-service tenga que llamar a events-service por
+    // separado solo para calcular el monto a cobrar — tickets-service ya
+    // tiene su propia copia sincronizada (ZonesConsumer).
+    return { ...hold, zoneId, quantity, price: Number(zone.price) };
   }
 
   async release(reservationId: string): Promise<void> {

@@ -6,15 +6,16 @@ import '../../core/theme/app_theme.dart';
 import '../events/event_models.dart';
 import 'ticket_models.dart';
 
-/// Pantalla del boleto emitido. El swipe hacia abajo para cerrar sigue
-/// DESIGN_SYSTEM.md §2-6: tracking 1:1 con el dedo, velocity handoff al
-/// soltar, proyección de momentum para decidir si cierra o vuelve a su
-/// lugar, y SpringSimulation (nunca Curves fijos) para que se pueda
-/// agarrar a mitad de una animación en curso.
+/// Pantalla de los boletos emitidos por una compra (Fase A: una orden
+/// puede emitir varios, ver DESIGN.md). Con más de uno, se navega entre
+/// ellos con un `PageView` horizontal — el swipe hacia abajo para cerrar
+/// sigue DESIGN_SYSTEM.md §2-6 (tracking 1:1, velocity handoff,
+/// SpringSimulation nunca Curves fijos) y convive con el paginado
+/// horizontal porque son ejes perpendiculares, sin ambigüedad de gestos.
 class TicketScreen extends StatefulWidget {
-  const TicketScreen({super.key, required this.ticket, required this.event, required this.zone});
+  const TicketScreen({super.key, required this.tickets, required this.event, required this.zone});
 
-  final TicketModel ticket;
+  final List<TicketModel> tickets;
   final EventModel event;
   final ZoneModel zone;
 
@@ -24,12 +25,15 @@ class TicketScreen extends StatefulWidget {
 
 class _TicketScreenState extends State<TicketScreen> with SingleTickerProviderStateMixin {
   late final AnimationController _controller = AnimationController.unbounded(vsync: this, value: 0);
+  late final PageController _pageController = PageController();
+  int _page = 0;
 
   static const _dampedSpring = SpringDescription(mass: 1, stiffness: 246, damping: 25);
 
   @override
   void dispose() {
     _controller.dispose();
+    _pageController.dispose();
     super.dispose();
   }
 
@@ -71,17 +75,30 @@ class _TicketScreenState extends State<TicketScreen> with SingleTickerProviderSt
 
   @override
   Widget build(BuildContext context) {
+    final multiple = widget.tickets.length > 1;
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
         child: Column(
           children: [
-            Align(
-              alignment: Alignment.topRight,
-              child: IconButton(
-                icon: const Icon(Icons.close_rounded),
-                onPressed: () => Navigator.of(context).pop(),
-              ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                if (multiple)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 20),
+                    child: Text(
+                      '${_page + 1} de ${widget.tickets.length}',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                  )
+                else
+                  const SizedBox.shrink(),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
             ),
             Expanded(
               child: GestureDetector(
@@ -94,10 +111,37 @@ class _TicketScreenState extends State<TicketScreen> with SingleTickerProviderSt
                     offset: Offset(0, _controller.value),
                     child: child,
                   ),
-                  child: Center(child: _TicketCard(ticket: widget.ticket, event: widget.event, zone: widget.zone)),
+                  child: PageView.builder(
+                    controller: _pageController,
+                    physics: multiple ? const PageScrollPhysics() : const NeverScrollableScrollPhysics(),
+                    onPageChanged: (page) => setState(() => _page = page),
+                    itemCount: widget.tickets.length,
+                    itemBuilder: (context, index) => Center(
+                      child: _TicketCard(ticket: widget.tickets[index], event: widget.event, zone: widget.zone),
+                    ),
+                  ),
                 ),
               ),
             ),
+            if (multiple) ...[
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(
+                  widget.tickets.length,
+                  (i) => Container(
+                    width: 6,
+                    height: 6,
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: i == _page ? AppColors.accent : AppColors.border,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
           ],
         ),
       ),

@@ -9,7 +9,8 @@ export interface ReservationResult {
   reservationId: string;
   expiresAt: number;
   zoneId: string;
-  price: number;
+  quantity: number;
+  price: number; // precio UNITARIO — el caller multiplica por quantity
 }
 
 /**
@@ -30,12 +31,12 @@ export class TicketsClientService {
     this.baseUrl = config.getOrThrow<string>('TICKETS_SERVICE_URL');
   }
 
-  async reserve(zoneId: string, headers: RawInternalHeaders): Promise<ReservationResult> {
+  async reserve(zoneId: string, quantity: number, headers: RawInternalHeaders): Promise<ReservationResult> {
     try {
       const response = await firstValueFrom(
         this.http.post<ReservationResult>(
           `${this.baseUrl}/reservations`,
-          { zoneId },
+          { zoneId, quantity },
           { headers },
         ),
       );

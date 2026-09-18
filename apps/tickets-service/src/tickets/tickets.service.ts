@@ -11,6 +11,7 @@ export interface OrderPaidPayload {
   userId: string;
   zoneId: string;
   reservationId: string;
+  quantity: number;
 }
 
 class ZoneSoldOutError extends Error {}
@@ -51,8 +52,14 @@ export class TicketsService {
       return;
     }
 
-    const ticketId = randomUUID();
-    const qrToken = signTicketToken(ticketId, this.qrSecret);
+    // Fase A (varios boletos por orden): cada orden emite `quantity`
+    // boletos, cada uno con su propio id/QR — comparten orderId, así que
+    // ya se pueden agrupar como "los boletos de esta compra" sin cambiar
+    // el modelo de Ticket.
+    const tickets = Array.from({ length: payload.quantity }, () => {
+      const ticketId = randomUUID();
+      return { ticketId, qrToken: signTicketToken(ticketId, this.qrSecret) };
+    });
 
     await this.prisma.$transaction(async (tx) => {
       const zoneRows = await tx.$queryRaw<{ id: string; capacity: number }[]>`
@@ -64,26 +71,29 @@ export class TicketsService {
       }
 
       const confirmedCount = await tx.ticket.count({ where: { zoneId: payload.zoneId } });
-      if (confirmedCount >= zone.capacity) {
+      if (confirmedCount + payload.quantity > zone.capacity) {
         // No debería pasar nunca si el soft hold de Redis funcionó bien —
-        // se trata como caso crítico: se cobró y no hay cupo. Requiere
-        // intervención manual (reembolso), fuera de alcance de este paso
-        // (ver TODOS.md). Se lanza para que el mensaje vaya a la DLQ.
+        // se trata como caso crítico: se cobró y no hay cupo para los
+        // `quantity` boletos completos. Requiere intervención manual
+        // (reembolso parcial, fuera de alcance de este paso — ver
+        // TODOS.md). Se lanza para que el mensaje vaya a la DLQ.
         throw new ZoneSoldOutError(
-          `Zona ${payload.zoneId} sobrevendida al confirmar orden ${payload.orderId} — requiere revisión manual`,
+          `Zona ${payload.zoneId} sobrevendida al confirmar orden ${payload.orderId} (pidió ${payload.quantity}, quedaban ${zone.capacity - confirmedCount}) — requiere revisión manual`,
         );
       }
 
-      await tx.ticket.create({
-        data: {
-          id: ticketId,
-          zoneId: payload.zoneId,
-          userId: payload.userId,
-          orderId: payload.orderId,
-          reservationId: payload.reservationId,
-          qrToken,
-        },
-      });
+      for (const { ticketId, qrToken } of tickets) {
+        await tx.ticket.create({
+          data: {
+            id: ticketId,
+            zoneId: payload.zoneId,
+            userId: payload.userId,
+            orderId: payload.orderId,
+            reservationId: payload.reservationId,
+            qrToken,
+          },
+        });
+      }
 
       await tx.processedEvent.create({
         data: { eventId, eventType: 'order.paid' },
@@ -97,12 +107,17 @@ export class TicketsService {
       this.logger.warn(`No se pudo liberar el soft hold ${payload.reservationId}: ${err.message}`);
     });
 
-    await this.publisher.publish('ticket.issued', {
-      ticketId,
-      orderId: payload.orderId,
-      userId: payload.userId,
-      zoneId: payload.zoneId,
-    });
+    // Un evento por boleto (no uno con un array) — así ningún consumidor
+    // existente (dashboard en vivo de api-gateway, notifications-service)
+    // necesita cambiar para saber "cuántos boletos hay en este mensaje".
+    for (const { ticketId } of tickets) {
+      await this.publisher.publish('ticket.issued', {
+        ticketId,
+        orderId: payload.orderId,
+        userId: payload.userId,
+        zoneId: payload.zoneId,
+      });
+    }
   }
 
   findByUser(userId: string) {

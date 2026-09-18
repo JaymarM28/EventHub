@@ -32,6 +32,7 @@ describe('TicketsService', () => {
     userId: 'user-1',
     zoneId: 'zone-1',
     reservationId: 'res-1',
+    quantity: 1,
   };
 
   beforeEach(async () => {
@@ -106,6 +107,19 @@ describe('TicketsService', () => {
     );
   });
 
+  it('Fase A: crea un ticket por cada unidad de `quantity`, todos con el mismo orderId, y publica un ticket.issued por cada uno', async () => {
+    prisma.processedEvent.findUnique.mockResolvedValue(null);
+    tx.$queryRaw.mockResolvedValue([{ id: 'zone-1', capacity: 10 }]);
+    tx.ticket.count.mockResolvedValue(3); // 3 confirmados, cupo 10 — piden 4, hay lugar
+
+    await service.confirmFromOrder('ev-multi', { ...payload, quantity: 4 });
+
+    expect(tx.ticket.create).toHaveBeenCalledTimes(4);
+    expect(publisher.publish).toHaveBeenCalledTimes(4);
+    const ticketIds = tx.ticket.create.mock.calls.map((call) => call[0].data.id);
+    expect(new Set(ticketIds).size).toBe(4); // cuatro ids distintos, no el mismo repetido
+  });
+
   it('rechaza si la zona no existe', async () => {
     prisma.processedEvent.findUnique.mockResolvedValue(null);
     tx.$queryRaw.mockResolvedValue([]);
@@ -122,6 +136,18 @@ describe('TicketsService', () => {
     tx.ticket.count.mockResolvedValue(5); // ya vendidos = capacidad exacta
 
     await expect(service.confirmFromOrder('ev-4', payload)).rejects.toThrow(
+      /sobrevendida/,
+    );
+    expect(tx.ticket.create).not.toHaveBeenCalled();
+    expect(publisher.publish).not.toHaveBeenCalled();
+  });
+
+  it('GARANTÍA DURA (Fase A): rechaza si alcanza para ALGUNOS boletos de la orden pero no para todos', async () => {
+    prisma.processedEvent.findUnique.mockResolvedValue(null);
+    tx.$queryRaw.mockResolvedValue([{ id: 'zone-1', capacity: 5 }]);
+    tx.ticket.count.mockResolvedValue(3); // quedan 2, pero la orden pide 4 — nunca emitir solo la mitad
+
+    await expect(service.confirmFromOrder('ev-5', { ...payload, quantity: 4 })).rejects.toThrow(
       /sobrevendida/,
     );
     expect(tx.ticket.create).not.toHaveBeenCalled();

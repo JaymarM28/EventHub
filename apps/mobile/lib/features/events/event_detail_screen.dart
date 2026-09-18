@@ -32,10 +32,10 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
       context.push('/login');
       return;
     }
-    final ticket = await showCheckoutSheet(context, event: event, zone: zone);
-    if (ticket != null && context.mounted) {
+    final tickets = await showCheckoutSheet(context, event: event, zone: zone);
+    if (tickets != null && context.mounted) {
       Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => TicketScreen(ticket: ticket, event: event, zone: zone)),
+        MaterialPageRoute(builder: (_) => TicketScreen(tickets: tickets, event: event, zone: zone)),
       );
     }
   }

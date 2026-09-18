@@ -15,7 +15,7 @@ export class ReservationsController {
 
   @Post()
   create(@Body() dto: CreateReservationDto, @InternalUser() user: InternalUserContext) {
-    return this.reservationsService.reserve(dto.zoneId, user.userId);
+    return this.reservationsService.reserve(dto.zoneId, user.userId, dto.quantity);
   }
 
   @Delete(':id')

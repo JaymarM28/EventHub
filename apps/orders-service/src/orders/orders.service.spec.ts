@@ -20,7 +20,8 @@ describe('OrdersService', () => {
     reservationId: 'res-1',
     expiresAt: Date.now() + 60_000,
     zoneId: 'zone-1',
-    price: 50,
+    quantity: 1,
+    price: 50, // unitario
   };
 
   beforeEach(async () => {
@@ -53,19 +54,19 @@ describe('OrdersService', () => {
   it('checkout exitoso: reserva, cobra, marca PAID y escribe el outbox event', async () => {
     payments.charge.mockResolvedValue({ success: true });
 
-    const result = await service.checkout('zone-1', 'user-1', headers);
+    const result = await service.checkout('zone-1', 1, 'user-1', headers);
 
-    expect(ticketsClient.reserve).toHaveBeenCalledWith('zone-1', headers);
+    expect(ticketsClient.reserve).toHaveBeenCalledWith('zone-1', 1, headers);
     expect(prisma.order.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ userId: 'user-1', reservationId: 'res-1', amount: 50 }),
+        data: expect.objectContaining({ userId: 'user-1', reservationId: 'res-1', quantity: 1, amount: 50 }),
       }),
     );
     expect(prisma.outboxEvent.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           type: 'order.paid',
-          payload: expect.objectContaining({ orderId: 'order-1', reservationId: 'res-1' }),
+          payload: expect.objectContaining({ orderId: 'order-1', reservationId: 'res-1', quantity: 1 }),
         }),
       }),
     );
@@ -73,10 +74,22 @@ describe('OrdersService', () => {
     expect(ticketsClient.release).not.toHaveBeenCalled();
   });
 
+  it('Fase A: el monto de la orden es precio unitario × cantidad, no el precio unitario solo', async () => {
+    ticketsClient.reserve.mockResolvedValue({ ...reservation, quantity: 4 });
+    payments.charge.mockResolvedValue({ success: true });
+
+    await service.checkout('zone-1', 4, 'user-1', headers);
+
+    expect(payments.charge).toHaveBeenCalledWith(200); // 50 × 4
+    expect(prisma.order.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ quantity: 4, amount: 200 }) }),
+    );
+  });
+
   it('pago rechazado: marca la orden FAILED, libera la reserva y lanza 402', async () => {
     payments.charge.mockResolvedValue({ success: false });
 
-    await expect(service.checkout('zone-1', 'user-1', headers)).rejects.toBeInstanceOf(
+    await expect(service.checkout('zone-1', 1, 'user-1', headers)).rejects.toBeInstanceOf(
       HttpException,
     );
 
@@ -90,7 +103,7 @@ describe('OrdersService', () => {
   it('si tickets-service rechaza la reserva (zona agotada), no crea ninguna orden', async () => {
     ticketsClient.reserve.mockRejectedValue(new Error('Zona agotada'));
 
-    await expect(service.checkout('zone-1', 'user-1', headers)).rejects.toThrow(
+    await expect(service.checkout('zone-1', 1, 'user-1', headers)).rejects.toThrow(
       'Zona agotada',
     );
     expect(prisma.order.create).not.toHaveBeenCalled();

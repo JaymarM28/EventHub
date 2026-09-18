@@ -19,7 +19,8 @@ model Order {
   userId        String
   zoneId        String
   reservationId String
-  amount        Decimal     @db.Decimal(10, 2)
+  quantity      Int         @default(1) // Fase A: varios boletos por orden
+  amount        Decimal     @db.Decimal(10, 2) // TOTAL (precio unitario × quantity), no unitario
   status        OrderStatus @default(PENDING)
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt

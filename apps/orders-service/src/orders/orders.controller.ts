@@ -13,7 +13,7 @@ export class OrdersController {
     @InternalUser() user: InternalUserContext,
     @InternalHeaders() headers: RawInternalHeaders,
   ) {
-    return this.ordersService.checkout(dto.zoneId, user.userId, headers);
+    return this.ordersService.checkout(dto.zoneId, dto.quantity, user.userId, headers);
   }
 
   @Get('mine')

@@ -26,7 +26,7 @@ describe('TicketsClientService', () => {
   it('devuelve la reserva cuando tickets-service responde 2xx', async () => {
     http.post.mockReturnValue(of({ data: { reservationId: 'res-1', zoneId: 'z1', price: 50, expiresAt: 1 } }));
 
-    const result = await service.reserve('z1', { 'x-internal-context': 'p', 'x-internal-signature': 's' });
+    const result = await service.reserve('z1', 1, { 'x-internal-context': 'p', 'x-internal-signature': 's' });
 
     expect(result.reservationId).toBe('res-1');
   });
@@ -39,7 +39,7 @@ describe('TicketsClientService', () => {
     );
 
     await expect(
-      service.reserve('z1', { 'x-internal-context': 'p', 'x-internal-signature': 's' }),
+      service.reserve('z1', 1, { 'x-internal-context': 'p', 'x-internal-signature': 's' }),
     ).rejects.toMatchObject({
       status: 409,
       message: 'Zona agotada',
@@ -50,7 +50,7 @@ describe('TicketsClientService', () => {
     http.post.mockReturnValue(throwError(() => new Error('ECONNREFUSED')));
 
     const err = await service
-      .reserve('z1', { 'x-internal-context': 'p', 'x-internal-signature': 's' })
+      .reserve('z1', 1, { 'x-internal-context': 'p', 'x-internal-signature': 's' })
       .catch((e) => e);
 
     expect(err).toBeInstanceOf(HttpException);

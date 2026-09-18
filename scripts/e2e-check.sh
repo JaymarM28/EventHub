@@ -150,10 +150,11 @@ ORG_TOKEN=$(curl -s -X POST "$GATEWAY_URL/auth/login" -H "Content-Type: applicat
   -d "{\"email\":\"$ORG_EMAIL\",\"password\":\"password123\"}" | python3 -c "import sys,json; print(json.load(sys.stdin)['accessToken'])")
 [ -n "$ORG_TOKEN" ] && ok "login organizador" || { bad "login organizador falló"; exit 1; }
 
-log "Creando evento (capacidad 1, para forzar el límite)..."
+log "Creando evento (zona de capacidad 1 para forzar el límite, y otra de capacidad 5 para Fase A)..."
 CREATE=$(curl -s -X POST "$GATEWAY_URL/events" -H "Content-Type: application/json" -H "Authorization: Bearer $ORG_TOKEN" \
-  -d '{"title":"E2E Check","venue":"CI","startsAt":"2027-06-01T20:00:00.000Z","zones":[{"name":"Unica","price":10,"capacity":1}]}')
+  -d '{"title":"E2E Check","venue":"CI","startsAt":"2027-06-01T20:00:00.000Z","zones":[{"name":"Unica","price":10,"capacity":1},{"name":"Multi","price":20,"capacity":5}]}')
 ZONE_ID=$(echo "$CREATE" | python3 -c "import sys,json; print(json.load(sys.stdin)['zones'][0]['id'])" 2>/dev/null)
+MULTI_ZONE_ID=$(echo "$CREATE" | python3 -c "import sys,json; print(json.load(sys.stdin)['zones'][1]['id'])" 2>/dev/null)
 EVENT_ID=$(echo "$CREATE" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null)
 [ -n "$ZONE_ID" ] && ok "evento creado, zona $ZONE_ID" || { bad "creación de evento falló: $CREATE"; exit 1; }
 
@@ -168,7 +169,7 @@ BUYER_TOKEN=$(curl -s -X POST "$GATEWAY_URL/auth/login" -H "Content-Type: applic
 
 log "Checkout (compra 1 de 1 disponibles)..."
 ORDER=$(curl -s -w "\n%{http_code}" -X POST "$GATEWAY_URL/orders/checkout" -H "Content-Type: application/json" -H "Authorization: Bearer $BUYER_TOKEN" \
-  -d "{\"zoneId\":\"$ZONE_ID\"}")
+  -d "{\"zoneId\":\"$ZONE_ID\",\"quantity\":1}")
 ORDER_CODE=$(echo "$ORDER" | tail -1)
 [ "$ORDER_CODE" = "201" ] && ok "checkout exitoso" || bad "checkout falló con $ORDER_CODE: $ORDER"
 
@@ -179,8 +180,29 @@ curl -s -X POST "$GATEWAY_URL/auth/register" -H "Content-Type: application/json"
 BUYER2_TOKEN=$(curl -s -X POST "$GATEWAY_URL/auth/login" -H "Content-Type: application/json" \
   -d "{\"email\":\"$BUYER2_EMAIL\",\"password\":\"password123\"}" | python3 -c "import sys,json; print(json.load(sys.stdin)['accessToken'])")
 REJECT_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$GATEWAY_URL/orders/checkout" -H "Content-Type: application/json" -H "Authorization: Bearer $BUYER2_TOKEN" \
-  -d "{\"zoneId\":\"$ZONE_ID\"}")
+  -d "{\"zoneId\":\"$ZONE_ID\",\"quantity\":1}")
 [ "$REJECT_CODE" = "409" ] && ok "sobreventa bloqueada (409)" || bad "se esperaba 409, dio $REJECT_CODE"
+
+log "Fase A: comprar varios boletos en una sola orden..."
+BUYER3_EMAIL="buyer3-e2e-$EMAIL_SUFFIX@eventhub.dev"
+curl -s -X POST "$GATEWAY_URL/auth/register" -H "Content-Type: application/json" \
+  -d "{\"email\":\"$BUYER3_EMAIL\",\"password\":\"password123\",\"firstName\":\"Buyer3\",\"lastName\":\"E2E\",\"birthDate\":\"1990-01-01\"}" >/dev/null
+BUYER3_TOKEN=$(curl -s -X POST "$GATEWAY_URL/auth/login" -H "Content-Type: application/json" \
+  -d "{\"email\":\"$BUYER3_EMAIL\",\"password\":\"password123\"}" | python3 -c "import sys,json; print(json.load(sys.stdin)['accessToken'])")
+MULTI_ORDER=$(curl -s -X POST "$GATEWAY_URL/orders/checkout" -H "Content-Type: application/json" -H "Authorization: Bearer $BUYER3_TOKEN" \
+  -d "{\"zoneId\":\"$MULTI_ZONE_ID\",\"quantity\":3}")
+MULTI_ORDER_ID=$(echo "$MULTI_ORDER" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null)
+MULTI_AMOUNT=$(echo "$MULTI_ORDER" | python3 -c "import sys,json; print(json.load(sys.stdin)['amount'])" 2>/dev/null)
+[ "$MULTI_AMOUNT" = "60" ] && ok "monto de la orden = precio unitario × cantidad (20×3=60)" || bad "monto esperado 60, fue $MULTI_AMOUNT"
+
+sleep 3 # tiempo para el outbox + consumo de order.paid/ticket.issued (3 boletos)
+
+MULTI_TICKET_COUNT=$(curl -s "$GATEWAY_URL/tickets/mine" -H "Authorization: Bearer $BUYER3_TOKEN" | python3 -c "
+import sys, json
+tickets = json.load(sys.stdin)
+print(len([t for t in tickets if t['orderId'] == '$MULTI_ORDER_ID']))
+")
+[ "$MULTI_TICKET_COUNT" = "3" ] && ok "se emitieron los 3 boletos de la orden" || bad "se esperaban 3 boletos, se emitieron $MULTI_TICKET_COUNT"
 
 sleep 3 # tiempo para el outbox + consumo de order.paid/ticket.issued
 
@@ -223,8 +245,8 @@ for db in auth_db events_db tickets_db orders_db notifications_db access_db; do
   case "$db" in
     auth_db) psql_q "$db" "DELETE FROM refresh_tokens; DELETE FROM users WHERE email LIKE '%-e2e-$EMAIL_SUFFIX@%';" >/dev/null ;;
     events_db) psql_q "$db" "DELETE FROM zones WHERE id = '$ZONE_ID'; DELETE FROM events WHERE title = 'E2E Check';" >/dev/null ;;
-    tickets_db) psql_q "$db" "DELETE FROM tickets WHERE \"zoneId\" = '$ZONE_ID'; DELETE FROM event_zones WHERE id = '$ZONE_ID';" >/dev/null ;;
-    orders_db) psql_q "$db" "DELETE FROM orders WHERE \"zoneId\" = '$ZONE_ID';" >/dev/null ;;
+    tickets_db) psql_q "$db" "DELETE FROM tickets WHERE \"zoneId\" IN ('$ZONE_ID', '$MULTI_ZONE_ID'); DELETE FROM event_zones WHERE id IN ('$ZONE_ID', '$MULTI_ZONE_ID');" >/dev/null ;;
+    orders_db) psql_q "$db" "DELETE FROM orders WHERE \"zoneId\" IN ('$ZONE_ID', '$MULTI_ZONE_ID');" >/dev/null ;;
     access_db) psql_q "$db" "DELETE FROM event_access WHERE \"eventId\" = '$EVENT_ID';" >/dev/null ;;
     *) ;;
   esac

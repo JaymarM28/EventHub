@@ -42,7 +42,7 @@ describe('ReservationsService', () => {
   it('lanza NotFoundException si la zona no existe', async () => {
     prisma.eventZone.findUnique.mockResolvedValue(null);
 
-    await expect(service.reserve('zone-x', 'user-1')).rejects.toBeInstanceOf(
+    await expect(service.reserve('zone-x', 'user-1', 1)).rejects.toBeInstanceOf(
       NotFoundException,
     );
   });
@@ -51,21 +51,31 @@ describe('ReservationsService', () => {
     prisma.eventZone.findUnique.mockResolvedValue({ id: 'zone-1', capacity: 5 });
     prisma.ticket.count.mockResolvedValue(5);
 
-    await expect(service.reserve('zone-1', 'user-1')).rejects.toBeInstanceOf(
+    await expect(service.reserve('zone-1', 'user-1', 1)).rejects.toBeInstanceOf(
       ConflictException,
     );
     expect(redis.tryReserve).not.toHaveBeenCalled();
   });
 
-  it('reserva exitosamente cuando hay cupo y Redis acepta, incluyendo el precio de la zona', async () => {
+  it('rechaza si pide más boletos de los que quedan, aunque alcance para uno solo', async () => {
+    prisma.eventZone.findUnique.mockResolvedValue({ id: 'zone-1', capacity: 5 });
+    prisma.ticket.count.mockResolvedValue(3); // quedan 2
+
+    await expect(service.reserve('zone-1', 'user-1', 3)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(redis.tryReserve).not.toHaveBeenCalled();
+  });
+
+  it('reserva exitosamente cuando hay cupo y Redis acepta, incluyendo el precio unitario de la zona', async () => {
     prisma.eventZone.findUnique.mockResolvedValue({ id: 'zone-1', capacity: 5, price: '50' });
     prisma.ticket.count.mockResolvedValue(2);
     redis.tryReserve.mockResolvedValue({ reservationId: 'res-1', expiresAt: 123 });
 
-    const result = await service.reserve('zone-1', 'user-1');
+    const result = await service.reserve('zone-1', 'user-1', 3);
 
-    expect(redis.tryReserve).toHaveBeenCalledWith('zone-1', 'user-1', 3, expect.any(Number));
-    expect(result).toEqual({ reservationId: 'res-1', expiresAt: 123, zoneId: 'zone-1', price: 50 });
+    expect(redis.tryReserve).toHaveBeenCalledWith('zone-1', 'user-1', 3, 3, expect.any(Number));
+    expect(result).toEqual({ reservationId: 'res-1', expiresAt: 123, zoneId: 'zone-1', quantity: 3, price: 50 });
   });
 
   it('rechaza si Redis dice que la zona está llena de reservas activas', async () => {
@@ -73,7 +83,7 @@ describe('ReservationsService', () => {
     prisma.ticket.count.mockResolvedValue(1);
     redis.tryReserve.mockResolvedValue(null);
 
-    await expect(service.reserve('zone-1', 'user-1')).rejects.toBeInstanceOf(
+    await expect(service.reserve('zone-1', 'user-1', 1)).rejects.toBeInstanceOf(
       ConflictException,
     );
   });

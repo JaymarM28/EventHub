@@ -14,9 +14,12 @@ class OrdersRepository {
 
   final ApiClient _apiClient;
 
-  Future<OrderModel> checkout(String zoneId) async {
+  Future<OrderModel> checkout(String zoneId, int quantity) async {
     try {
-      final response = await _apiClient.dio.post('/orders/checkout', data: {'zoneId': zoneId});
+      final response = await _apiClient.dio.post(
+        '/orders/checkout',
+        data: {'zoneId': zoneId, 'quantity': quantity},
+      );
       return OrderModel.fromJson(response.data as Map<String, dynamic>);
     } on DioException catch (e) {
       throw CheckoutException(_extractMessage(e));

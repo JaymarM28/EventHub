@@ -14,6 +14,7 @@ interface RedisWithCommands extends Redis {
     maxAvailable: number,
     zoneId: string,
     userId: string,
+    quantity: number,
   ): Promise<number>;
 }
 
@@ -48,6 +49,7 @@ export class RedisService implements OnModuleDestroy {
   async tryReserve(
     zoneId: string,
     userId: string,
+    quantity: number,
     maxAvailable: number,
     ttlMs: number,
   ): Promise<{ reservationId: string; expiresAt: number } | null> {
@@ -64,6 +66,7 @@ export class RedisService implements OnModuleDestroy {
       maxAvailable,
       zoneId,
       userId,
+      quantity,
     );
 
     return result === 1 ? { reservationId, expiresAt } : null;

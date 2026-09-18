@@ -16,23 +16,27 @@ export class OrdersService {
     private readonly payments: PaymentsService,
   ) {}
 
-  async checkout(zoneId: string, userId: string, headers: RawInternalHeaders) {
+  async checkout(zoneId: string, quantity: number, userId: string, headers: RawInternalHeaders) {
     // 1. Reserva síncrona en tickets-service (Finding 1) — falla rápido si
-    //    la zona está agotada, antes de crear cualquier registro de orden.
-    const reservation = await this.ticketsClient.reserve(zoneId, headers);
+    //    la zona no tiene `quantity` cupos, antes de crear cualquier
+    //    registro de orden.
+    const reservation = await this.ticketsClient.reserve(zoneId, quantity, headers);
+    // reservation.price es UNITARIO — el monto de la orden es el total.
+    const totalAmount = reservation.price * reservation.quantity;
 
     const order = await this.prisma.order.create({
       data: {
         userId,
         zoneId: reservation.zoneId,
         reservationId: reservation.reservationId,
-        amount: reservation.price,
+        quantity: reservation.quantity,
+        amount: totalAmount,
         status: 'PENDING',
       },
     });
 
     // 2. Pago (simulado por ahora — ver payments.service.ts).
-    const payment = await this.payments.charge(reservation.price);
+    const payment = await this.payments.charge(totalAmount);
 
     if (!payment.success) {
       await this.prisma.order.update({
@@ -63,6 +67,7 @@ export class OrdersService {
             userId,
             zoneId: reservation.zoneId,
             reservationId: reservation.reservationId,
+            quantity: reservation.quantity,
           },
         },
       }),
