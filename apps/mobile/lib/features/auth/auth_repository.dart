@@ -1,5 +1,7 @@
 import 'dart:convert';
+
 import 'package:dio/dio.dart';
+
 import '../../core/api_client.dart';
 import '../../core/token_storage.dart';
 
@@ -56,7 +58,10 @@ class AuthRepository {
       // Best-effort — la sesión termina localmente aunque esta llamada
       // falle (sin red, servidor caído). No bloquear el logout por esto.
       try {
-        await _apiClient.dio.post('/auth/logout', data: {'refreshToken': refreshToken});
+        await _apiClient.dio.post(
+          '/auth/logout',
+          data: {'refreshToken': refreshToken},
+        );
       } on DioException {
         // ignorar
       }
@@ -64,24 +69,66 @@ class AuthRepository {
     await _tokenStorage.clear();
   }
 
+  /// Siempre "éxito" desde la perspectiva del backend (nunca revela si el
+  /// email existe — ver AuthService.forgotPassword) — no hay nada que
+  /// capturar como error de negocio acá, solo de conexión.
+  Future<void> forgotPassword(String email) async {
+    try {
+      await _apiClient.dio.post(
+        '/auth/forgot-password',
+        data: {'email': email},
+      );
+    } on DioException catch (e) {
+      throw AuthException(_extractMessage(e));
+    }
+  }
+
+  Future<void> resetPassword({
+    required String email,
+    required String code,
+    required String newPassword,
+  }) async {
+    try {
+      await _apiClient.dio.post(
+        '/auth/reset-password',
+        data: {'email': email, 'code': code, 'newPassword': newPassword},
+      );
+    } on DioException catch (e) {
+      throw AuthException(_extractMessage(e));
+    }
+  }
+
   Future<bool> hasSession() async {
     return await _tokenStorage.accessToken != null;
   }
 
-  /// No hay endpoint `/auth/me` — los roles ya viajan en el claim `roles`
-  /// del access token (ver auth-service), así que se leen ahí en vez de
+  /// No hay endpoint `/auth/me` — los roles y el email ya viajan en el
+  /// access token (ver auth-service), así que se leen ahí en vez de
   /// pedirle un viaje de red extra al backend.
   Future<List<String>> currentRoles() async {
+    final payload = await _decodedPayload();
+    return (payload?['roles'] as List<dynamic>?)
+            ?.map((r) => r.toString())
+            .toList() ??
+        [];
+  }
+
+  Future<String?> currentEmail() async {
+    final payload = await _decodedPayload();
+    return payload?['email'] as String?;
+  }
+
+  Future<Map<String, dynamic>?> _decodedPayload() async {
     final token = await _tokenStorage.accessToken;
-    if (token == null) return [];
+    if (token == null) return null;
     try {
       final parts = token.split('.');
-      if (parts.length != 3) return [];
+      if (parts.length != 3) return null;
       final normalized = base64Url.normalize(parts[1]);
-      final payload = jsonDecode(utf8.decode(base64Url.decode(normalized))) as Map<String, dynamic>;
-      return (payload['roles'] as List<dynamic>?)?.map((r) => r.toString()).toList() ?? [];
+      return jsonDecode(utf8.decode(base64Url.decode(normalized)))
+          as Map<String, dynamic>;
     } catch (_) {
-      return [];
+      return null;
     }
   }
 

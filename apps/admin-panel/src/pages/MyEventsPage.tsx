@@ -1,7 +1,16 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { createEvent, findMyEvents, type EventItem, type ZoneDraft } from '../api/events';
+import {
+  createEvent,
+  findMyEvents,
+  EVENT_CATEGORY_LABELS,
+  type EventCategory,
+  type EventItem,
+  type ZoneDraft,
+} from '../api/events';
 import { extractErrorMessage } from '../api/client';
+import { Skeleton } from '../components/Skeleton';
+import { useToast } from '../components/Toast';
 
 const emptyZone = (): ZoneDraft => ({ name: '', price: 0, capacity: 0 });
 
@@ -18,8 +27,11 @@ export function MyEventsPage() {
 
   return (
     <div className="page">
-      <div className="row-between" style={{ marginBottom: 20 }}>
-        <h1>Mis eventos</h1>
+      <div className="row-between page-header" style={{ marginBottom: 20 }}>
+        <div>
+          <p className="eyebrow">Organizador</p>
+          <h1>Mis eventos</h1>
+        </div>
         <button className="btn-primary" onClick={() => setShowForm((v) => !v)}>
           {showForm ? 'Cancelar' : '+ Nuevo evento'}
         </button>
@@ -37,21 +49,44 @@ export function MyEventsPage() {
         </div>
       )}
 
-      {events === null && <p className="muted">Cargando…</p>}
-      {events?.length === 0 && <p className="muted">Todavía no creaste ningún evento.</p>}
+      {events === null && (
+        <div className="stack">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="card row" style={{ gap: 14 }}>
+              <Skeleton width={52} height={56} radius={14} />
+              <div style={{ flex: 1 }}>
+                <Skeleton width={180} height={16} />
+                <div style={{ marginTop: 6 }}>
+                  <Skeleton width={220} height={13} />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {events?.length === 0 && <p className="empty-state">Todavía no creaste ningún evento.</p>}
 
       <div className="stack">
-        {events?.map((event) => (
-          <Link key={event.id} to={`/events/${event.id}`} className="card row-between" style={{ textDecoration: 'none', color: 'inherit' }}>
-            <div>
-              <h3>{event.title}</h3>
-              <p className="muted">
-                {event.venue} · {new Date(event.startsAt).toLocaleString('es', { dateStyle: 'medium', timeStyle: 'short' })}
-              </p>
-            </div>
-            <span className="badge badge-accent">{event.zones.length} zonas</span>
-          </Link>
-        ))}
+        {events?.map((event) => {
+          const startsAt = new Date(event.startsAt);
+          return (
+            <Link key={event.id} to={`/events/${event.id}`} className="card card-link row-between">
+              <div className="row" style={{ gap: 14 }}>
+                <span className="date-badge">
+                  <span className="month">{startsAt.toLocaleDateString('es', { month: 'short' }).replace('.', '')}</span>
+                  <span className="day">{startsAt.getDate()}</span>
+                </span>
+                <div>
+                  <h3>{event.title}</h3>
+                  <p className="muted">
+                    {event.venue} · {startsAt.toLocaleString('es', { dateStyle: 'medium', timeStyle: 'short' })}
+                  </p>
+                </div>
+              </div>
+              <span className="badge badge-accent">{event.zones.length} zonas</span>
+            </Link>
+          );
+        })}
       </div>
     </div>
   );
@@ -61,10 +96,15 @@ function CreateEventForm({ onCreated }: { onCreated: (event: EventItem) => void 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [venue, setVenue] = useState('');
+  const [city, setCity] = useState('');
+  const [category, setCategory] = useState<EventCategory>('MUSICA');
   const [startsAt, setStartsAt] = useState('');
+  const [coverImageUrl, setCoverImageUrl] = useState('');
+  const [galleryImageUrls, setGalleryImageUrls] = useState('');
   const [zones, setZones] = useState<ZoneDraft[]>([emptyZone()]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const { showToast } = useToast();
 
   const updateZone = (index: number, patch: Partial<ZoneDraft>) => {
     setZones((prev) => prev.map((z, i) => (i === index ? { ...z, ...patch } : z)));
@@ -79,9 +119,17 @@ function CreateEventForm({ onCreated }: { onCreated: (event: EventItem) => void 
         title,
         description: description || undefined,
         venue,
+        city,
+        category,
         startsAt: new Date(startsAt).toISOString(),
         zones,
+        coverImageUrl: coverImageUrl || undefined,
+        galleryImageUrls: galleryImageUrls
+          .split(',')
+          .map((url) => url.trim())
+          .filter(Boolean),
       });
+      showToast(`${title} creado`);
       onCreated(event);
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -107,6 +155,22 @@ function CreateEventForm({ onCreated }: { onCreated: (event: EventItem) => void 
           <input id="venue" value={venue} onChange={(e) => setVenue(e.target.value)} required />
         </div>
         <div style={{ flex: 1 }}>
+          <label htmlFor="city">Ciudad</label>
+          <input id="city" value={city} onChange={(e) => setCity(e.target.value)} required />
+        </div>
+      </div>
+      <div className="row">
+        <div style={{ flex: 1 }}>
+          <label htmlFor="category">Categoría</label>
+          <select id="category" value={category} onChange={(e) => setCategory(e.target.value as EventCategory)}>
+            {Object.entries(EVENT_CATEGORY_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div style={{ flex: 1 }}>
           <label htmlFor="startsAt">Fecha y hora</label>
           <input
             id="startsAt"
@@ -114,6 +178,27 @@ function CreateEventForm({ onCreated }: { onCreated: (event: EventItem) => void 
             value={startsAt}
             onChange={(e) => setStartsAt(e.target.value)}
             required
+          />
+        </div>
+      </div>
+      <div className="row">
+        <div style={{ flex: 1 }}>
+          <label htmlFor="coverImageUrl">URL de portada (opcional)</label>
+          <input
+            id="coverImageUrl"
+            type="url"
+            placeholder="https://..."
+            value={coverImageUrl}
+            onChange={(e) => setCoverImageUrl(e.target.value)}
+          />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label htmlFor="galleryImageUrls">Galería (URLs separadas por coma, opcional)</label>
+          <input
+            id="galleryImageUrls"
+            placeholder="https://..., https://..."
+            value={galleryImageUrls}
+            onChange={(e) => setGalleryImageUrls(e.target.value)}
           />
         </div>
       </div>

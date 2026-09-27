@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+
 import 'config.dart';
 import 'token_storage.dart';
 
@@ -26,7 +27,9 @@ class ApiClient {
           final isAuthEndpoint = error.requestOptions.path.startsWith('/auth/');
           final alreadyRetried = error.requestOptions.extra['retried'] == true;
 
-          if (error.response?.statusCode == 401 && !isAuthEndpoint && !alreadyRetried) {
+          if (error.response?.statusCode == 401 &&
+              !isAuthEndpoint &&
+              !alreadyRetried) {
             final refreshed = await _tryRefresh();
             if (refreshed) {
               final newToken = await _tokenStorage.accessToken;
@@ -61,7 +64,10 @@ class ApiClient {
     if (refreshToken == null) return false;
 
     try {
-      final response = await _refreshDio.post('/auth/refresh', data: {'refreshToken': refreshToken});
+      final response = await _refreshDio.post(
+        '/auth/refresh',
+        data: {'refreshToken': refreshToken},
+      );
       await _tokenStorage.save(
         accessToken: response.data['accessToken'] as String,
         refreshToken: response.data['refreshToken'] as String,

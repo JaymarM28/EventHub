@@ -11,6 +11,7 @@ export interface ReservationResult {
   zoneId: string;
   quantity: number;
   price: number; // precio UNITARIO — el caller multiplica por quantity
+  currency: string; // Fase D (#20) — moneda del evento, viaja hasta acá desde events-service
 }
 
 /**

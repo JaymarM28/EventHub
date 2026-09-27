@@ -1,4 +1,5 @@
-import { IsDateString, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsDateString, IsEnum, IsOptional, IsString, IsUrl, Length } from 'class-validator';
+import { EventCategory } from '../../../generated/prisma-client';
 
 /**
  * No incluye `zones` — editar/agregar zonas tiene sus propios endpoints
@@ -22,6 +23,28 @@ export class UpdateEventDto {
   venue?: string;
 
   @IsOptional()
+  @IsString()
+  city?: string;
+
+  @IsOptional()
+  @IsEnum(EventCategory)
+  category?: EventCategory;
+
+  @IsOptional()
+  @IsString()
+  @Length(3, 3)
+  currency?: string;
+
+  @IsOptional()
   @IsDateString()
   startsAt?: string;
+
+  @IsOptional()
+  @IsUrl()
+  coverImageUrl?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsUrl({}, { each: true })
+  galleryImageUrls?: string[];
 }

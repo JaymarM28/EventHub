@@ -1,13 +1,14 @@
 import { Module } from '@nestjs/common';
 import { HttpModule } from '@nestjs/axios';
-import { PaymentsModule } from '../payments/payments.module';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 import { TicketsClientService } from './tickets-client.service';
+import { WompiClientService } from './wompi-client.service';
+import { EventsClientService } from './events-client.service';
 
 @Module({
-  imports: [HttpModule, PaymentsModule],
+  imports: [HttpModule],
   controllers: [OrdersController],
-  providers: [OrdersService, TicketsClientService],
+  providers: [OrdersService, TicketsClientService, WompiClientService, EventsClientService],
 })
 export class OrdersModule {}

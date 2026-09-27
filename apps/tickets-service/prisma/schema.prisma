@@ -17,6 +17,11 @@ model EventZone {
   eventId   String
   name      String
   price     Decimal  @db.Decimal(10, 2)
+  /// Fase D (#20, pagos reales): denormalizado desde Event.currency —
+  /// orders-service lo necesita para crear el PaymentIntent de Stripe en
+  /// la moneda correcta, y solo llega hasta acá vía la reserva (ver
+  /// ReservationsService.reserve → orders-service/tickets-client.ts).
+  currency  String   @default("COP")
   capacity  Int
   syncedAt  DateTime @default(now())
 
@@ -39,6 +44,11 @@ model Ticket {
   /// `scannedAt: null` en el where) al validar en la puerta — evita que dos
   /// escaneos concurrentes del mismo boleto pasen ambos (paso 7).
   scannedAt     DateTime?
+  /// Fase E: etiqueta informativa para "asignar boletos de una compra
+  /// grupal a amigos" — no cambia el dueño real (userId) ni requiere que
+  /// el amigo tenga cuenta, solo identifica para quién es cada boleto
+  /// dentro de una orden con quantity>1. Editable solo por el dueño.
+  assignedToName String?
 
   @@index([zoneId])
   @@index([userId])

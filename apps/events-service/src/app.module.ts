@@ -5,6 +5,7 @@ import { InternalAuthGuard, RolesGuard } from '@event-hub/internal-auth';
 import { PrismaModule } from './prisma/prisma.module';
 import { MessagingModule } from './messaging/messaging.module';
 import { EventsModule } from './events/events.module';
+import { VenuesModule } from './venues/venues.module';
 
 @Module({
   imports: [
@@ -12,6 +13,7 @@ import { EventsModule } from './events/events.module';
     PrismaModule,
     MessagingModule,
     EventsModule,
+    VenuesModule,
   ],
   providers: [
     {

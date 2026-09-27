@@ -35,8 +35,18 @@ export function buildRoutes(): ServiceRoute[] {
   const accessServiceUrl = process.env.ACCESS_SERVICE_URL ?? 'http://localhost:3006';
 
   return [
+    // Debe ir ANTES de `/auth` (público) — Express monta middlewares en
+    // orden de registro, así que si `/auth` general fuera primero se
+    // quedaría con /auth/admin/* también (mismo prefijo). Con este orden,
+    // el panel de SUPER_ADMIN sí exige JWT válido y llega con el contexto
+    // interno firmado (roles incluidos) que AdminUsersController exige.
+    { pathPrefix: '/auth/admin', target: authServiceUrl, authMode: 'required' },
     { pathPrefix: '/auth', target: authServiceUrl, authMode: 'public' },
     { pathPrefix: '/events', target: eventsServiceUrl, authMode: 'optional' },
+    // Establecimientos: catálogo de plataforma administrado por
+    // SUPER_ADMIN, listado también por organizadores (para elegir uno al
+    // crear un evento, a futuro — ver DESIGN.md Fase de plataforma).
+    { pathPrefix: '/venues', target: eventsServiceUrl, authMode: 'required' },
     // Nota: POST /reservations y todo /internal/tickets/* de tickets-service
     // NO se exponen aquí a propósito — son llamadas internas service-to-
     // service (orders→tickets para reservar, Finding 1; access→tickets
@@ -44,6 +54,11 @@ export function buildRoutes(): ServiceRoute[] {
     // que viven bajo prefijos que el gateway simplemente nunca registra —
     // solo alcanzables por llamada directa entre servicios.
     { pathPrefix: '/tickets', target: ticketsServiceUrl, authMode: 'required' },
+    // Deben ir ANTES de `/orders` (mismo motivo que /auth/admin arriba):
+    // Mercado Pago llama al webhook, y el WebView de Checkout Pro navega a
+    // checkout-return, ninguno de los dos con un JWT nuestro.
+    { pathPrefix: '/orders/webhooks', target: ordersServiceUrl, authMode: 'public' },
+    { pathPrefix: '/orders/checkout-return', target: ordersServiceUrl, authMode: 'public' },
     { pathPrefix: '/orders', target: ordersServiceUrl, authMode: 'required' },
     { pathPrefix: '/notifications', target: notificationsServiceUrl, authMode: 'required' },
     { pathPrefix: '/access', target: accessServiceUrl, authMode: 'required' },

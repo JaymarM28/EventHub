@@ -7,14 +7,33 @@ export interface Zone {
   capacity: number;
 }
 
+/** Debe mantenerse en sync con EventCategory en events-service/prisma/schema.prisma. */
+export type EventCategory = 'MUSICA' | 'DEPORTES' | 'TEATRO' | 'CONFERENCIA' | 'FESTIVAL' | 'OTRO';
+
+export const EVENT_CATEGORY_LABELS: Record<EventCategory, string> = {
+  MUSICA: 'Música',
+  DEPORTES: 'Deportes',
+  TEATRO: 'Teatro',
+  CONFERENCIA: 'Conferencia',
+  FESTIVAL: 'Festival',
+  OTRO: 'Otro',
+};
+
 export interface EventItem {
   id: string;
   title: string;
   description: string | null;
   venue: string;
+  city: string | null;
+  category: EventCategory | null;
   startsAt: string;
   organizerId: string;
   zones: Zone[];
+  coverImageUrl: string | null;
+  galleryImageUrls: string[];
+  /** Geocodificadas automáticamente por el backend (DESIGN.md #18) — no se editan desde el panel. */
+  latitude: number | null;
+  longitude: number | null;
 }
 
 export interface ZoneDraft {
@@ -27,15 +46,23 @@ export interface CreateEventInput {
   title: string;
   description?: string;
   venue: string;
+  city: string;
+  category: EventCategory;
   startsAt: string;
   zones: ZoneDraft[];
+  coverImageUrl?: string;
+  galleryImageUrls?: string[];
 }
 
 export interface UpdateEventInput {
   title?: string;
   description?: string;
   venue?: string;
+  city?: string;
+  category?: EventCategory;
   startsAt?: string;
+  coverImageUrl?: string;
+  galleryImageUrls?: string[];
 }
 
 export interface ZoneDashboard {
@@ -69,6 +96,28 @@ export interface AddStaffInput {
   firstName: string;
   lastName: string;
   birthDate: string;
+}
+
+/** Debe mantenerse en sync con DiscountType en events-service/prisma/schema.prisma. */
+export type DiscountType = 'PERCENTAGE' | 'FIXED';
+
+export interface DiscountCode {
+  id: string;
+  eventId: string;
+  code: string;
+  type: DiscountType;
+  value: string;
+  maxUses: number | null;
+  usedCount: number;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface CreateDiscountCodeInput {
+  code: string;
+  type: DiscountType;
+  value: number;
+  maxUses?: number;
 }
 
 export async function findMyEvents(): Promise<EventItem[]> {
@@ -119,5 +168,20 @@ export interface UpdateZoneInput {
 
 export async function updateZone(eventId: string, zoneId: string, input: UpdateZoneInput): Promise<EventItem> {
   const response = await apiClient.patch<EventItem>(`/events/${eventId}/zones/${zoneId}`, input);
+  return response.data;
+}
+
+export async function listDiscountCodes(eventId: string): Promise<DiscountCode[]> {
+  const response = await apiClient.get<DiscountCode[]>(`/events/${eventId}/discount-codes`);
+  return response.data;
+}
+
+export async function createDiscountCode(eventId: string, input: CreateDiscountCodeInput): Promise<DiscountCode> {
+  const response = await apiClient.post<DiscountCode>(`/events/${eventId}/discount-codes`, input);
+  return response.data;
+}
+
+export async function setDiscountCodeActive(eventId: string, codeId: string, active: boolean): Promise<DiscountCode> {
+  const response = await apiClient.patch<DiscountCode>(`/events/${eventId}/discount-codes/${codeId}`, { active });
   return response.data;
 }

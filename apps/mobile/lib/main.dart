@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:provider/provider.dart';
+
 import 'app_router.dart';
 import 'core/api_client.dart';
 import 'core/auth_state.dart';
@@ -11,6 +12,7 @@ import 'features/access/access_repository.dart';
 import 'features/auth/auth_repository.dart';
 import 'features/checkout/orders_repository.dart';
 import 'features/events/events_repository.dart';
+import 'features/events/favorites_state.dart';
 import 'features/tickets/tickets_repository.dart';
 
 Future<void> main() async {
@@ -29,25 +31,33 @@ Future<void> main() async {
   // para cuando de verdad se invoque (un 401 real, después de main()), ya
   // está asignada.
   late final AuthState authState;
-  final apiClient = ApiClient(tokenStorage, onSessionExpired: () => authState.forceLogout());
+  final apiClient = ApiClient(
+    tokenStorage,
+    onSessionExpired: () => authState.forceLogout(),
+  );
   final authRepository = AuthRepository(apiClient, tokenStorage);
   authState = AuthState(authRepository);
   final eventsRepository = EventsRepository(apiClient);
   final ordersRepository = OrdersRepository(apiClient);
   final ticketsRepository = TicketsRepository(apiClient);
   final accessRepository = AccessRepository(apiClient);
+  final favoritesState = FavoritesState();
   final router = buildRouter(authState);
 
   authState.bootstrap();
+  favoritesState.load();
 
-  runApp(EventHubApp(
-    authState: authState,
-    eventsRepository: eventsRepository,
-    ordersRepository: ordersRepository,
-    ticketsRepository: ticketsRepository,
-    accessRepository: accessRepository,
-    router: router,
-  ));
+  runApp(
+    EventHubApp(
+      authState: authState,
+      eventsRepository: eventsRepository,
+      ordersRepository: ordersRepository,
+      ticketsRepository: ticketsRepository,
+      accessRepository: accessRepository,
+      favoritesState: favoritesState,
+      router: router,
+    ),
+  );
 }
 
 class EventHubApp extends StatelessWidget {
@@ -58,6 +68,7 @@ class EventHubApp extends StatelessWidget {
     required this.ordersRepository,
     required this.ticketsRepository,
     required this.accessRepository,
+    required this.favoritesState,
     required this.router,
   });
 
@@ -66,6 +77,7 @@ class EventHubApp extends StatelessWidget {
   final OrdersRepository ordersRepository;
   final TicketsRepository ticketsRepository;
   final AccessRepository accessRepository;
+  final FavoritesState favoritesState;
   final GoRouter router;
 
   @override
@@ -77,10 +89,11 @@ class EventHubApp extends StatelessWidget {
         Provider.value(value: ordersRepository),
         Provider.value(value: ticketsRepository),
         Provider.value(value: accessRepository),
+        ChangeNotifierProvider.value(value: favoritesState),
       ],
       child: MaterialApp.router(
         title: 'Event Hub',
-        theme: AppTheme.light(),
+        theme: AppTheme.dark(),
         routerConfig: router,
       ),
     );

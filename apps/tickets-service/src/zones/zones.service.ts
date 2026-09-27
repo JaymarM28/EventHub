@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 
 interface EventCreatedPayload {
   id: string;
+  currency: string;
   zones: { id: string; name: string; price: string | number; capacity: number }[];
 }
 
@@ -27,11 +28,13 @@ export class ZonesService {
             eventId: payload.id,
             name: zone.name,
             price: zone.price,
+            currency: payload.currency,
             capacity: zone.capacity,
           },
           update: {
             name: zone.name,
             price: zone.price,
+            currency: payload.currency,
             capacity: zone.capacity,
             syncedAt: new Date(),
           },

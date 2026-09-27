@@ -1,10 +1,11 @@
 import { Test } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { TicketsService } from './tickets.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { DomainEventsPublisher } from '../messaging/domain-events.publisher';
+import { AuthClientService } from './auth-client.service';
 
 describe('TicketsService', () => {
   let service: TicketsService;
@@ -15,9 +16,11 @@ describe('TicketsService', () => {
       updateMany: jest.Mock;
       findUnique: jest.Mock;
       findUniqueOrThrow: jest.Mock;
+      findMany: jest.Mock;
       groupBy: jest.Mock;
+      update: jest.Mock;
     };
-    eventZone: { findUnique: jest.Mock };
+    eventZone: { findUnique: jest.Mock; findMany: jest.Mock };
   };
   let tx: {
     $queryRaw: jest.Mock;
@@ -26,6 +29,7 @@ describe('TicketsService', () => {
   };
   let redis: { release: jest.Mock };
   let publisher: { publish: jest.Mock };
+  let authClient: { findByEmail: jest.Mock };
 
   const payload = {
     orderId: 'order-1',
@@ -48,12 +52,15 @@ describe('TicketsService', () => {
         updateMany: jest.fn(),
         findUnique: jest.fn(),
         findUniqueOrThrow: jest.fn(),
+        findMany: jest.fn(),
         groupBy: jest.fn(),
+        update: jest.fn(),
       },
-      eventZone: { findUnique: jest.fn() },
+      eventZone: { findUnique: jest.fn(), findMany: jest.fn() },
     };
     redis = { release: jest.fn().mockResolvedValue(undefined) };
     publisher = { publish: jest.fn().mockResolvedValue(undefined) };
+    authClient = { findByEmail: jest.fn() };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -61,6 +68,7 @@ describe('TicketsService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: RedisService, useValue: redis },
         { provide: DomainEventsPublisher, useValue: publisher },
+        { provide: AuthClientService, useValue: authClient },
         {
           provide: ConfigService,
           useValue: { getOrThrow: () => 'test-qr-secret' },
@@ -152,6 +160,129 @@ describe('TicketsService', () => {
     );
     expect(tx.ticket.create).not.toHaveBeenCalled();
     expect(publisher.publish).not.toHaveBeenCalled();
+  });
+
+  describe('findByUser', () => {
+    it('enriquece cada boleto con eventId/nombre/precio de zona ("Mis boletos" en la app)', async () => {
+      prisma.ticket.findMany.mockResolvedValue([
+        { id: 'ticket-1', zoneId: 'zone-1', userId: 'user-1', orderId: 'order-1', qrToken: 'q1', scannedAt: null },
+        { id: 'ticket-2', zoneId: 'zone-2', userId: 'user-1', orderId: 'order-2', qrToken: 'q2', scannedAt: null },
+      ]);
+      prisma.eventZone.findMany.mockResolvedValue([
+        { id: 'zone-1', eventId: 'event-1', name: 'General', price: 50 },
+        { id: 'zone-2', eventId: 'event-2', name: 'VIP', price: 200 },
+      ]);
+
+      const result = await service.findByUser('user-1');
+
+      expect(prisma.eventZone.findMany).toHaveBeenCalledWith({
+        where: { id: { in: ['zone-1', 'zone-2'] } },
+      });
+      expect(result).toEqual([
+        expect.objectContaining({ id: 'ticket-1', eventId: 'event-1', zoneName: 'General', zonePrice: 50 }),
+        expect.objectContaining({ id: 'ticket-2', eventId: 'event-2', zoneName: 'VIP', zonePrice: 200 }),
+      ]);
+    });
+
+    it('no rompe si una zona no está sincronizada (eventId/zoneName/zonePrice quedan null)', async () => {
+      prisma.ticket.findMany.mockResolvedValue([
+        { id: 'ticket-1', zoneId: 'zone-huerfana', userId: 'user-1', orderId: 'order-1', qrToken: 'q1', scannedAt: null },
+      ]);
+      prisma.eventZone.findMany.mockResolvedValue([]);
+
+      const result = await service.findByUser('user-1');
+
+      expect(result).toEqual([
+        expect.objectContaining({ id: 'ticket-1', eventId: null, zoneName: null, zonePrice: null }),
+      ]);
+    });
+  });
+
+  describe('assignTo', () => {
+    it('actualiza assignedToName cuando el que pide es el dueño del boleto', async () => {
+      prisma.ticket.findUnique.mockResolvedValue({ id: 'ticket-1', userId: 'user-1' });
+      prisma.ticket.update.mockResolvedValue({ id: 'ticket-1', userId: 'user-1', assignedToName: 'Ana' });
+
+      const result = await service.assignTo('ticket-1', 'user-1', 'Ana');
+
+      expect(prisma.ticket.update).toHaveBeenCalledWith({
+        where: { id: 'ticket-1' },
+        data: { assignedToName: 'Ana' },
+      });
+      expect(result).toEqual(expect.objectContaining({ assignedToName: 'Ana' }));
+    });
+
+    it('rechaza si el boleto no es del que pide asignarlo', async () => {
+      prisma.ticket.findUnique.mockResolvedValue({ id: 'ticket-1', userId: 'user-1' });
+
+      await expect(service.assignTo('ticket-1', 'user-2', 'Ana')).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(prisma.ticket.update).not.toHaveBeenCalled();
+    });
+
+    it('lanza NotFoundException si el boleto no existe', async () => {
+      prisma.ticket.findUnique.mockResolvedValue(null);
+
+      await expect(service.assignTo('no-existe', 'user-1', 'Ana')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+  });
+
+  describe('transferTo', () => {
+    const headers = { 'x-internal-context': 'p', 'x-internal-signature': 's' };
+
+    it('reasigna el userId del boleto al destinatario encontrado por email y limpia assignedToName', async () => {
+      prisma.ticket.findUnique.mockResolvedValue({ id: 'ticket-1', userId: 'user-1', scannedAt: null });
+      authClient.findByEmail.mockResolvedValue({ id: 'user-2', email: 'friend@b.com' });
+      prisma.ticket.update.mockResolvedValue({ id: 'ticket-1', userId: 'user-2' });
+
+      const result = await service.transferTo('ticket-1', 'user-1', 'friend@b.com', headers);
+
+      expect(authClient.findByEmail).toHaveBeenCalledWith('friend@b.com', headers);
+      expect(prisma.ticket.update).toHaveBeenCalledWith({
+        where: { id: 'ticket-1' },
+        data: { userId: 'user-2', assignedToName: null },
+      });
+      expect(result).toEqual(expect.objectContaining({ userId: 'user-2' }));
+    });
+
+    it('rechaza si el boleto no es del que pide transferirlo', async () => {
+      prisma.ticket.findUnique.mockResolvedValue({ id: 'ticket-1', userId: 'user-1', scannedAt: null });
+
+      await expect(service.transferTo('ticket-1', 'user-2', 'friend@b.com', headers)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(authClient.findByEmail).not.toHaveBeenCalled();
+    });
+
+    it('rechaza transferir un boleto ya utilizado', async () => {
+      prisma.ticket.findUnique.mockResolvedValue({ id: 'ticket-1', userId: 'user-1', scannedAt: new Date() });
+
+      await expect(service.transferTo('ticket-1', 'user-1', 'friend@b.com', headers)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(authClient.findByEmail).not.toHaveBeenCalled();
+    });
+
+    it('rechaza transferirse un boleto a uno mismo', async () => {
+      prisma.ticket.findUnique.mockResolvedValue({ id: 'ticket-1', userId: 'user-1', scannedAt: null });
+      authClient.findByEmail.mockResolvedValue({ id: 'user-1', email: 'yo@b.com' });
+
+      await expect(service.transferTo('ticket-1', 'user-1', 'yo@b.com', headers)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(prisma.ticket.update).not.toHaveBeenCalled();
+    });
+
+    it('lanza NotFoundException si el boleto no existe', async () => {
+      prisma.ticket.findUnique.mockResolvedValue(null);
+
+      await expect(service.transferTo('no-existe', 'user-1', 'friend@b.com', headers)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
   });
 
   describe('validateScan', () => {

@@ -29,9 +29,15 @@ model User {
   lastName     String
   birthDate    DateTime
   roles        Role[]         @default([ATTENDEE])
+  /// null = sin verificar. Fase B (#16) — no bloquea login ni compra
+  /// todavía, solo se registra; endurecerlo (exigirlo para X) queda para
+  /// cuando haya una razón de negocio concreta.
+  emailVerifiedAt DateTime?
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
   refreshTokens RefreshToken[]
+  emailVerificationTokens EmailVerificationToken[]
+  passwordResetTokens PasswordResetToken[]
 
   @@map("users")
 }
@@ -52,4 +58,37 @@ model RefreshToken {
 
   @@index([userId])
   @@map("refresh_tokens")
+}
+
+/// Mismo criterio que RefreshToken: se guarda el HASH del token, nunca el
+/// valor en claro que va por email. El link de verificación apunta a un
+/// GET público (se abre desde el cliente de correo, sin sesión iniciada).
+model EmailVerificationToken {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("email_verification_tokens")
+}
+
+/// A diferencia del link de verificación, la recuperación de contraseña
+/// usa un CÓDIGO corto (no un link) — la app Flutter es la superficie
+/// real de este flujo (no hay una página web a la que un link pudiera
+/// llevar), así que pedirle al usuario que tipee un código de 6 dígitos
+/// en la app es más simple que inventar una landing page solo para esto.
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("password_reset_tokens")
 }

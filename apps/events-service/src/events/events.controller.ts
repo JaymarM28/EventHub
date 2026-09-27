@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import {
   InternalHeaders,
   InternalUser,
@@ -10,8 +10,10 @@ import {
 import { EventsService } from './events.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
+import { FindEventsQueryDto } from './dto/find-events-query.dto';
 import { AddStaffDto } from './dto/add-staff.dto';
 import { CreateZoneDto, UpdateZoneDto } from './dto/zone.dto';
+import { CreateDiscountCodeDto, UpdateDiscountCodeDto } from './dto/discount-code.dto';
 
 @Controller('events')
 export class EventsController {
@@ -25,8 +27,8 @@ export class EventsController {
 
   @Get()
   @Public()
-  findAll() {
-    return this.eventsService.findAll();
+  findAll(@Query() query: FindEventsQueryDto) {
+    return this.eventsService.findAll(query);
   }
 
   // Debe declararse ANTES de `:id` — Nest resuelve rutas en orden de
@@ -92,5 +94,32 @@ export class EventsController {
     @InternalUser() user: InternalUserContext,
   ) {
     return this.eventsService.updateZone(id, zoneId, dto, user);
+  }
+
+  @Post(':id/discount-codes')
+  @Roles('ORGANIZER', 'SUPER_ADMIN')
+  createDiscountCode(
+    @Param('id') id: string,
+    @Body() dto: CreateDiscountCodeDto,
+    @InternalUser() user: InternalUserContext,
+  ) {
+    return this.eventsService.createDiscountCode(id, dto, user);
+  }
+
+  @Get(':id/discount-codes')
+  @Roles('ORGANIZER', 'SUPER_ADMIN')
+  listDiscountCodes(@Param('id') id: string, @InternalUser() user: InternalUserContext) {
+    return this.eventsService.listDiscountCodes(id, user);
+  }
+
+  @Patch(':id/discount-codes/:codeId')
+  @Roles('ORGANIZER', 'SUPER_ADMIN')
+  updateDiscountCode(
+    @Param('id') id: string,
+    @Param('codeId') codeId: string,
+    @Body() dto: UpdateDiscountCodeDto,
+    @InternalUser() user: InternalUserContext,
+  ) {
+    return this.eventsService.updateDiscountCode(id, codeId, dto, user);
   }
 }

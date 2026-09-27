@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+
 import '../../core/api_client.dart';
 import 'order_models.dart';
 
@@ -14,11 +15,20 @@ class OrdersRepository {
 
   final ApiClient _apiClient;
 
-  Future<OrderModel> checkout(String zoneId, int quantity) async {
+  Future<OrderModel> checkout(
+    String zoneId,
+    int quantity, {
+    String? discountCode,
+  }) async {
     try {
       final response = await _apiClient.dio.post(
         '/orders/checkout',
-        data: {'zoneId': zoneId, 'quantity': quantity},
+        data: {
+          'zoneId': zoneId,
+          'quantity': quantity,
+          if (discountCode != null && discountCode.isNotEmpty)
+            'discountCode': discountCode,
+        },
       );
       return OrderModel.fromJson(response.data as Map<String, dynamic>);
     } on DioException catch (e) {

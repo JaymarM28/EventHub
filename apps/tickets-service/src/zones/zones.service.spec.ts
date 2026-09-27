@@ -19,6 +19,7 @@ describe('ZonesService', () => {
   it('hace upsert de cada zona del evento', async () => {
     await service.syncFromEvent({
       id: 'event-1',
+      currency: 'COP',
       zones: [
         { id: 'zone-1', name: 'General', price: '50', capacity: 100 },
         { id: 'zone-2', name: 'VIP', price: 150, capacity: 20 },
@@ -29,7 +30,7 @@ describe('ZonesService', () => {
     expect(prisma.eventZone.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'zone-1' },
-        create: expect.objectContaining({ eventId: 'event-1', name: 'General' }),
+        create: expect.objectContaining({ eventId: 'event-1', name: 'General', currency: 'COP' }),
       }),
     );
   });

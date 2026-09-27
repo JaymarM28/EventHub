@@ -1,4 +1,5 @@
 import 'dart:io' show Platform;
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 
 /// URL base del api-gateway (único servicio expuesto, ver DESIGN.md paso 3).

@@ -3,12 +3,16 @@ import { InternalUserContext, RawInternalHeaders } from '@event-hub/internal-aut
 import { EVENT_TYPES } from '@event-hub/shared-types';
 import { PrismaService } from '../prisma/prisma.service';
 import { DomainEventsPublisher } from '../messaging/domain-events.publisher';
+import { Prisma } from '../../generated/prisma-client';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
+import { FindEventsQueryDto } from './dto/find-events-query.dto';
 import { AddStaffDto } from './dto/add-staff.dto';
 import { CreateZoneDto, UpdateZoneDto } from './dto/zone.dto';
+import { CreateDiscountCodeDto, UpdateDiscountCodeDto } from './dto/discount-code.dto';
 import { AuthClientService } from './auth-client.service';
 import { TicketsClientService } from './tickets-client.service';
+import { GeocodingService } from './geocoding.service';
 
 @Injectable()
 export class EventsService {
@@ -17,16 +21,27 @@ export class EventsService {
     private readonly publisher: DomainEventsPublisher,
     private readonly authClient: AuthClientService,
     private readonly ticketsClient: TicketsClientService,
+    private readonly geocoding: GeocodingService,
   ) {}
 
   async create(dto: CreateEventDto, organizerId: string) {
+    // Best-effort (ver GeocodingService) — un fallo acá nunca bloquea la
+    // creación del evento, solo lo deja sin mapa.
+    const point = await this.geocoding.geocode(dto.venue, dto.city);
+
     const event = await this.prisma.event.create({
       data: {
         title: dto.title,
         description: dto.description,
         venue: dto.venue,
+        city: dto.city,
+        category: dto.category,
+        ...(dto.currency !== undefined && { currency: dto.currency }),
         startsAt: new Date(dto.startsAt),
         organizerId,
+        ...(dto.coverImageUrl !== undefined && { coverImageUrl: dto.coverImageUrl }),
+        ...(dto.galleryImageUrls !== undefined && { galleryImageUrls: dto.galleryImageUrls }),
+        ...(point && { latitude: point.latitude, longitude: point.longitude, address: point.address }),
         zones: {
           create: dto.zones.map((zone) => ({
             name: zone.name,
@@ -43,8 +58,28 @@ export class EventsService {
     return event;
   }
 
-  findAll() {
+  /**
+   * Fase C (#19): todos los filtros son opcionales y se combinan con AND
+   * — sin ninguno, se comporta igual que antes. `maxPrice` filtra por
+   * "tiene alguna zona a ese precio o menos" (ver comentario del DTO).
+   */
+  findAll(query: FindEventsQueryDto = {}) {
+    const where: Prisma.EventWhereInput = {
+      ...(query.city && { city: { equals: query.city, mode: 'insensitive' } }),
+      ...(query.category && { category: query.category }),
+      ...((query.fromDate || query.toDate) && {
+        startsAt: {
+          ...(query.fromDate && { gte: new Date(query.fromDate) }),
+          ...(query.toDate && { lte: new Date(query.toDate) }),
+        },
+      }),
+      ...(query.maxPrice !== undefined && {
+        zones: { some: { price: { lte: query.maxPrice } } },
+      }),
+    };
+
     return this.prisma.event.findMany({
+      where,
       include: { zones: true },
       orderBy: { startsAt: 'asc' },
     });
@@ -73,13 +108,29 @@ export class EventsService {
     const existing = await this.findOne(id); // 404 si no existe
     this.assertOwner(existing.organizerId, requester, 'editarlo');
 
+    // Re-geocodificar solo si venue/city cambiaron — evita gastar el
+    // presupuesto de rate-limit de Nominatim en ediciones que no mueven la
+    // ubicación (ej. cambiar solo la descripción).
+    const venueChanged = dto.venue !== undefined && dto.venue !== existing.venue;
+    const cityChanged = dto.city !== undefined && dto.city !== existing.city;
+    const point =
+      venueChanged || cityChanged
+        ? await this.geocoding.geocode(dto.venue ?? existing.venue, dto.city ?? existing.city ?? '')
+        : null;
+
     const event = await this.prisma.event.update({
       where: { id },
       data: {
         ...(dto.title !== undefined && { title: dto.title }),
         ...(dto.description !== undefined && { description: dto.description }),
         ...(dto.venue !== undefined && { venue: dto.venue }),
+        ...(dto.city !== undefined && { city: dto.city }),
+        ...(dto.category !== undefined && { category: dto.category }),
+        ...(dto.currency !== undefined && { currency: dto.currency }),
         ...(dto.startsAt !== undefined && { startsAt: new Date(dto.startsAt) }),
+        ...(dto.coverImageUrl !== undefined && { coverImageUrl: dto.coverImageUrl }),
+        ...(dto.galleryImageUrls !== undefined && { galleryImageUrls: dto.galleryImageUrls }),
+        ...(point && { latitude: point.latitude, longitude: point.longitude, address: point.address }),
       },
       include: { zones: true },
     });
@@ -218,6 +269,130 @@ export class EventsService {
     const event = await this.findOne(id);
     await this.publisher.publish(EVENT_TYPES.EVENT_UPDATED, event);
     return event;
+  }
+
+  /** #23 — código en mayúsculas siempre (evita que "AMIGOS20" y
+   * "amigos20" convivan como códigos distintos del mismo evento por un
+   * despiste de tipeo). */
+  async createDiscountCode(id: string, dto: CreateDiscountCodeDto, requester: InternalUserContext) {
+    const event = await this.findOne(id); // 404 si no existe
+    this.assertOwner(event.organizerId, requester, 'crear códigos de descuento');
+
+    if (dto.type === 'PERCENTAGE' && (dto.value <= 0 || dto.value > 100)) {
+      throw new BadRequestException('Un descuento por porcentaje debe estar entre 0 y 100');
+    }
+    if (dto.type === 'FIXED' && dto.value <= 0) {
+      throw new BadRequestException('Un descuento de monto fijo debe ser mayor a 0');
+    }
+
+    const code = dto.code.toUpperCase();
+    const existing = await this.prisma.discountCode.findUnique({
+      where: { eventId_code: { eventId: id, code } },
+    });
+    if (existing) {
+      throw new BadRequestException(`Ya existe un código "${code}" para este evento`);
+    }
+
+    return this.prisma.discountCode.create({
+      data: { eventId: id, code, type: dto.type, value: dto.value, maxUses: dto.maxUses },
+    });
+  }
+
+  async listDiscountCodes(id: string, requester: InternalUserContext) {
+    const event = await this.findOne(id); // 404 si no existe
+    this.assertOwner(event.organizerId, requester, 'ver los códigos de descuento');
+    return this.prisma.discountCode.findMany({ where: { eventId: id }, orderBy: { createdAt: 'desc' } });
+  }
+
+  /** Solo permite desactivar o cambiar el tope de usos — el tipo/valor de
+   * un código NO se edita una vez creado (evita el caso raro de cambiar
+   * las reglas de un código que alguien ya tiene guardado a mitad de
+   * canje); si el organizador se equivocó, borra el código y crea uno
+   * nuevo. */
+  async updateDiscountCode(id: string, codeId: string, dto: UpdateDiscountCodeDto, requester: InternalUserContext) {
+    const event = await this.findOne(id); // 404 si no existe
+    this.assertOwner(event.organizerId, requester, 'editar los códigos de descuento');
+
+    const code = await this.prisma.discountCode.findFirst({ where: { id: codeId, eventId: id } });
+    if (!code) {
+      throw new NotFoundException(`Código ${codeId} no encontrado en este evento`);
+    }
+
+    return this.prisma.discountCode.update({
+      where: { id: codeId },
+      data: {
+        ...(dto.maxUses !== undefined && { maxUses: dto.maxUses }),
+        ...(dto.active !== undefined && { active: dto.active }),
+      },
+    });
+  }
+
+  /**
+   * Llamado por orders-service durante el checkout — NUNCA vía gateway.
+   * Canje ATÓMICO: `SELECT ... FOR UPDATE` dentro de una transacción,
+   * mismo patrón que la reserva de zonas en tickets-service, para que dos
+   * checkouts concurrentes usando el último cupo del código no lo dejen
+   * en negativo (`usedCount > maxUses`).
+   */
+  async redeemDiscountCode(zoneId: string, rawCode: string) {
+    const code = rawCode.toUpperCase();
+    return this.prisma.$transaction(async (tx) => {
+      const zone = await tx.zone.findUnique({ where: { id: zoneId }, select: { eventId: true, price: true } });
+      if (!zone) {
+        throw new NotFoundException(`Zona ${zoneId} no existe`);
+      }
+
+      const rows = await tx.$queryRaw<
+        { id: string; type: 'PERCENTAGE' | 'FIXED'; value: Prisma.Decimal; maxUses: number | null; usedCount: number; active: boolean }[]
+      >`SELECT id, type, value, "maxUses", "usedCount", active FROM discount_codes
+        WHERE "eventId" = ${zone.eventId} AND code = ${code} FOR UPDATE`;
+      const discount = rows[0];
+      if (!discount || !discount.active) {
+        throw new BadRequestException('Código de descuento inválido');
+      }
+      if (discount.maxUses !== null && discount.usedCount >= discount.maxUses) {
+        throw new BadRequestException('Este código de descuento ya alcanzó su límite de usos');
+      }
+
+      await tx.discountCode.update({ where: { id: discount.id }, data: { usedCount: { increment: 1 } } });
+
+      return { type: discount.type, value: discount.value.toString(), zonePrice: zone.price.toString() };
+    });
+  }
+
+  /**
+   * Fase B (notificaciones reales al organizador): orders-service solo
+   * conoce el `zoneId` de la compra, no a quién pertenece el evento —
+   * notifications-service necesita este salto para poder avisarle al
+   * organizador de una venta nueva. Llamada interna, nunca vía gateway.
+   */
+  async findZoneWithOrganizer(zoneId: string) {
+    const zone = await this.prisma.zone.findUnique({
+      where: { id: zoneId },
+      include: {
+        event: {
+          select: { id: true, title: true, organizerId: true, venue: true, city: true, startsAt: true, currency: true },
+        },
+      },
+    });
+    if (!zone) {
+      throw new NotFoundException(`Zona ${zoneId} no existe`);
+    }
+    return {
+      eventId: zone.event.id,
+      eventTitle: zone.event.title,
+      organizerId: zone.event.organizerId,
+      // Fase B/#correo de compra: se agregan acá (en vez de un endpoint
+      // nuevo en orders-service) para armar el correo de confirmación sin
+      // otro salto de red — notifications-service ya llama a esto mismo
+      // para el aviso al organizador.
+      venue: zone.event.venue,
+      city: zone.event.city,
+      startsAt: zone.event.startsAt,
+      currency: zone.event.currency,
+      zoneName: zone.name,
+      zonePrice: zone.price.toString(),
+    };
   }
 
   private assertOwner(organizerId: string, requester: InternalUserContext, action: string): void {

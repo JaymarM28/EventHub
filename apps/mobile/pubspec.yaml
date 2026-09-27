@@ -57,6 +57,25 @@ dependencies:
   # Renderiza el qrToken del boleto (ver tickets-service) como imagen QR —
   # el token ya viene firmado (HMAC) del backend, esto solo lo dibuja.
   qr_flutter: ^4.1.0
+  # Fase D (#20): Checkout Pro de Mercado Pago es un flujo de redirección
+  # (no hay SDK de Mercado Pago para Flutter) — se abre en un WebView
+  # embebido y se detecta el regreso por la URL de vuelta.
+  webview_flutter: ^4.10.0
+  # Face ID / Touch ID como candado local sobre la sesión ya guardada — no
+  # es un mecanismo de auth nuevo contra el backend (ver DESIGN.md #32).
+  local_auth: ^2.3.0
+  # Favoritos (DESIGN.md #39) — guardado local de IDs de evento, sin
+  # backend todavía. No es sensible como el token (por eso no usa
+  # flutter_secure_storage) y no necesita ser leído por el backend.
+  shared_preferences: ^2.3.3
+  # Mapa de la locación (DESIGN.md #18) — tiles de OpenStreetMap, sin API
+  # key ni cuenta de facturación (a diferencia de google_maps_flutter),
+  # coherente con el resto del proyecto (ver Mercado Pago sobre Stripe).
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+  # "Abrir en Maps" desde el detalle del evento — deep link a la app nativa
+  # de mapas del dispositivo, no un mapa embebido de navegación.
+  url_launcher: ^6.3.1
 
 dev_dependencies:
   flutter_test:
@@ -68,6 +87,16 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  # Genera los íconos de iOS/Android en todos los tamaños a partir de un
+  # único PNG 1024×1024 (ver assets/icon.png) — solo se usa en dev, no se
+  # empaqueta en la app.
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  image_path: "assets/icon.png"
+  ios: true
+  android: true
+  remove_alpha_ios: true
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

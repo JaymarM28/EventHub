@@ -1,18 +1,32 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { UsersClientService } from './users-client.service';
+import { EmailService } from './email.service';
+import { renderEmailHtml } from './email-template';
 
 /**
- * "Envío" simulado (mismo criterio que el pago en orders-service): no hay
- * proveedor SMTP/push conectado — se loggea y se guarda en Postgres. La
- * idempotencia sigue el mismo contrato que tickets-service: se verifica
- * ProcessedEvent DENTRO de la misma transacción que crea la notificación,
- * así un mismo evento nunca genera dos notificaciones duplicadas.
+ * Fase B: envío real vía Resend (antes era un console.log simulado). La
+ * idempotencia sigue el mismo contrato que tickets-service (ProcessedEvent
+ * dentro de la transacción), pero el ORDEN cambió respecto a la versión
+ * simulada: ahora se envía el email PRIMERO y se marca procesado DESPUÉS.
+ * Si se hiciera al revés (marcar y luego enviar), un fallo de Resend a
+ * mitad de camino dejaría el evento como "procesado" sin haber enviado
+ * nada — nunca se reintentaría. El costo de este orden es la contraparte:
+ * si el envío tiene éxito pero el proceso muere antes de confirmar la
+ * transacción, un reintento podría enviar el mismo email dos veces. Se
+ * acepta ese trade-off (duplicado raro) sobre el otro (email perdido
+ * silenciosamente) — mismo criterio que "at-least-once" del resto del
+ * sistema (ver DESIGN.md premisa 7).
  */
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly usersClient: UsersClientService,
+    private readonly emailService: EmailService,
+  ) {}
 
   async notify(
     eventId: string,
@@ -29,6 +43,9 @@ export class NotificationsService {
       return;
     }
 
+    const recipient = await this.usersClient.findById(userId);
+    await this.emailService.send(recipient.email, subject, renderEmailHtml(subject, body));
+
     await this.prisma.$transaction([
       this.prisma.notification.create({
         data: { userId, subject, body },
@@ -37,9 +54,6 @@ export class NotificationsService {
         data: { eventId, eventType },
       }),
     ]);
-
-    // eslint-disable-next-line no-console
-    console.log(`[EMAIL SIMULADO] Para usuario ${userId} — ${subject}\n${body}`);
   }
 
   findByUser(userId: string) {

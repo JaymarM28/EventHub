@@ -53,10 +53,6 @@ export function LoginPage() {
           {loading ? 'Ingresando…' : 'Ingresar'}
         </button>
       </form>
-      <p className="muted" style={{ marginTop: 16, fontSize: 13 }}>
-        Esta cuenta debe tener el rol ORGANIZER (se asigna manualmente por ahora —
-        ver README.md).
-      </p>
     </div>
   );
 }

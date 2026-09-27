@@ -13,8 +13,10 @@ import 'package:mobile/features/access/access_repository.dart';
 import 'package:mobile/features/auth/auth_repository.dart';
 import 'package:mobile/features/checkout/orders_repository.dart';
 import 'package:mobile/features/events/events_repository.dart';
+import 'package:mobile/features/events/favorites_state.dart';
 import 'package:mobile/features/tickets/tickets_repository.dart';
 import 'package:mobile/main.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// TokenStorage real usa flutter_secure_storage (canal de plataforma), que
 /// en un widget test SIN binding nativo real no lanza excepción — se queda
@@ -33,7 +35,10 @@ class _FakeTokenStorage implements TokenStorage {
   Future<String?> get refreshToken async => _refresh;
 
   @override
-  Future<void> save({required String accessToken, required String refreshToken}) async {
+  Future<void> save({
+    required String accessToken,
+    required String refreshToken,
+  }) async {
     _access = accessToken;
     _refresh = refreshToken;
   }
@@ -72,9 +77,13 @@ class _FakeHttpClientAdapter implements HttpClientAdapter {
       },
     ]);
     final bytes = Uint8List.fromList(utf8.encode(payload));
-    return ResponseBody.fromBytes(bytes, 200, headers: {
-      Headers.contentTypeHeader: [Headers.jsonContentType],
-    });
+    return ResponseBody.fromBytes(
+      bytes,
+      200,
+      headers: {
+        Headers.contentTypeHeader: [Headers.jsonContentType],
+      },
+    );
   }
 
   @override
@@ -84,12 +93,18 @@ class _FakeHttpClientAdapter implements HttpClientAdapter {
 void main() {
   setUpAll(() async {
     await initializeDateFormatting('es');
+    SharedPreferences.setMockInitialValues({});
   });
 
-  testWidgets('arranca en /events y renderiza una card de evento real', (tester) async {
+  testWidgets('arranca en /events y renderiza una card de evento real', (
+    tester,
+  ) async {
     final tokenStorage = _FakeTokenStorage();
     late final AuthState authState;
-    final apiClient = ApiClient(tokenStorage, onSessionExpired: () => authState.forceLogout());
+    final apiClient = ApiClient(
+      tokenStorage,
+      onSessionExpired: () => authState.forceLogout(),
+    );
     apiClient.dio.httpClientAdapter = _FakeHttpClientAdapter();
     final authRepository = AuthRepository(apiClient, tokenStorage);
     authState = AuthState(authRepository);
@@ -97,16 +112,20 @@ void main() {
     final ordersRepository = OrdersRepository(apiClient);
     final ticketsRepository = TicketsRepository(apiClient);
     final accessRepository = AccessRepository(apiClient);
+    final favoritesState = FavoritesState();
     final router = buildRouter(authState);
 
-    await tester.pumpWidget(EventHubApp(
-      authState: authState,
-      eventsRepository: eventsRepository,
-      ordersRepository: ordersRepository,
-      ticketsRepository: ticketsRepository,
-      accessRepository: accessRepository,
-      router: router,
-    ));
+    await tester.pumpWidget(
+      EventHubApp(
+        authState: authState,
+        eventsRepository: eventsRepository,
+        ordersRepository: ordersRepository,
+        ticketsRepository: ticketsRepository,
+        accessRepository: accessRepository,
+        favoritesState: favoritesState,
+        router: router,
+      ),
+    );
     // pumpAndSettle no sirve acá: mientras la carga está pendiente se
     // muestra un CircularProgressIndicator, cuya animación es indeterminada
     // y nunca "se asienta". Un pump con delay alcanza para resolver el
@@ -114,8 +133,11 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
+    // El único evento de prueba aparece dos veces a propósito: una en el
+    // carrusel "Próximos" (DESIGN.md #38) y otra en "Todos los eventos" —
+    // no es una card duplicada por error, es la misma UI con dos vistas.
     expect(find.text('Eventos'), findsOneWidget);
-    expect(find.text('Evento de prueba'), findsOneWidget);
-    expect(find.text('Lugar de prueba'), findsOneWidget);
+    expect(find.text('Evento de prueba'), findsNWidgets(2));
+    expect(find.text('Lugar de prueba'), findsNWidgets(2));
   });
 }

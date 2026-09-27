@@ -1,6 +1,8 @@
 import { Test } from '@nestjs/testing';
 import { NotificationsService } from './notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { UsersClientService } from './users-client.service';
+import { EmailService } from './email.service';
 
 describe('NotificationsService', () => {
   let service: NotificationsService;
@@ -9,6 +11,8 @@ describe('NotificationsService', () => {
     notification: { create: jest.Mock };
     $transaction: jest.Mock;
   };
+  let usersClient: { findById: jest.Mock };
+  let emailService: { send: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
@@ -16,9 +20,16 @@ describe('NotificationsService', () => {
       notification: { create: jest.fn() },
       $transaction: jest.fn(async (ops) => Promise.all(ops)),
     };
+    usersClient = { findById: jest.fn().mockResolvedValue({ id: 'user-1', email: 'user1@example.com' }) };
+    emailService = { send: jest.fn().mockResolvedValue(undefined) };
 
     const moduleRef = await Test.createTestingModule({
-      providers: [NotificationsService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        NotificationsService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: UsersClientService, useValue: usersClient },
+        { provide: EmailService, useValue: emailService },
+      ],
     }).compile();
 
     service = moduleRef.get(NotificationsService);
@@ -30,14 +41,21 @@ describe('NotificationsService', () => {
     await service.notify('ev-1', 'order.paid', 'user-1', 'asunto', 'cuerpo');
 
     expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(emailService.send).not.toHaveBeenCalled();
   });
 
-  it('crea la notificación y marca el evento procesado en la misma transacción', async () => {
+  it('resuelve el email del usuario, envía el correo real y luego marca el evento procesado', async () => {
     prisma.processedEvent.findUnique.mockResolvedValue(null);
     prisma.notification.create.mockResolvedValue({});
 
     await service.notify('ev-2', 'ticket.issued', 'user-1', 'Tu boleto está listo', 'cuerpo');
 
+    expect(usersClient.findById).toHaveBeenCalledWith('user-1');
+    expect(emailService.send).toHaveBeenCalledWith(
+      'user1@example.com',
+      'Tu boleto está listo',
+      expect.stringContaining('Tu boleto está listo'),
+    );
     expect(prisma.notification.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -47,5 +65,15 @@ describe('NotificationsService', () => {
       }),
     );
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('si el envío de email falla, NO marca el evento como procesado (debe poder reintentarse)', async () => {
+    prisma.processedEvent.findUnique.mockResolvedValue(null);
+    emailService.send.mockRejectedValue(new Error('Resend rechazó el envío'));
+
+    await expect(service.notify('ev-3', 'order.paid', 'user-1', 'asunto', 'cuerpo')).rejects.toThrow(
+      'Resend rechazó el envío',
+    );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });

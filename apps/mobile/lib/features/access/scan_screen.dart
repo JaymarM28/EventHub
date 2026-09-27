@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
+
 import '../../core/theme/app_theme.dart';
 import 'access_repository.dart';
 import 'scan_result.dart';
@@ -18,7 +19,9 @@ class ScanScreen extends StatefulWidget {
 }
 
 class _ScanScreenState extends State<ScanScreen> {
-  final MobileScannerController _controller = MobileScannerController(detectionSpeed: DetectionSpeed.noDuplicates);
+  final MobileScannerController _controller = MobileScannerController(
+    detectionSpeed: DetectionSpeed.noDuplicates,
+  );
   bool _busy = false;
   ScanResult? _result;
 
@@ -103,7 +106,9 @@ class _ScanScreenState extends State<ScanScreen> {
           if (_result != null)
             Align(
               alignment: Alignment.bottomCenter,
-              child: SafeArea(child: _ResultPanel(result: _result!, onScanNext: _scanNext)),
+              child: SafeArea(
+                child: _ResultPanel(result: _result!, onScanNext: _scanNext),
+              ),
             )
           else if (_busy)
             const Align(
@@ -114,7 +119,10 @@ class _ScanScreenState extends State<ScanScreen> {
                   child: SizedBox(
                     width: 22,
                     height: 22,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
               ),
@@ -134,17 +142,40 @@ class _ResultPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (color, icon, title) = switch (result.status) {
-      ScanStatus.valid => (AppColors.success, Icons.check_circle_rounded, 'Boleto válido'),
-      ScanStatus.alreadyUsed => (AppColors.warning, Icons.error_rounded, 'Ya utilizado'),
-      ScanStatus.invalid => (AppColors.error, Icons.cancel_rounded, 'Boleto inválido'),
-      ScanStatus.degraded => (AppColors.inkSoft, Icons.wifi_off_rounded, 'No se pudo verificar'),
-      ScanStatus.error => (AppColors.error, Icons.cancel_rounded, 'Error de conexión'),
+      ScanStatus.valid => (
+        AppColors.success,
+        Icons.check_circle_rounded,
+        'Boleto válido',
+      ),
+      ScanStatus.alreadyUsed => (
+        AppColors.warning,
+        Icons.error_rounded,
+        'Ya utilizado',
+      ),
+      ScanStatus.invalid => (
+        AppColors.error,
+        Icons.cancel_rounded,
+        'Boleto inválido',
+      ),
+      ScanStatus.degraded => (
+        AppColors.inkSoft,
+        Icons.wifi_off_rounded,
+        'No se pudo verificar',
+      ),
+      ScanStatus.error => (
+        AppColors.error,
+        Icons.cancel_rounded,
+        'Error de conexión',
+      ),
     };
 
     return Container(
       margin: const EdgeInsets.all(16),
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(20)),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(20),
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -154,13 +185,19 @@ class _ResultPanel extends StatelessWidget {
               Icon(icon, color: color, size: 28),
               const SizedBox(width: 12),
               Expanded(
-                child: Text(title, style: Theme.of(context).textTheme.titleLarge),
+                child: Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
               ),
             ],
           ),
           if (result.message != null) ...[
             const SizedBox(height: 8),
-            Text(result.message!, style: Theme.of(context).textTheme.bodyMedium),
+            Text(
+              result.message!,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
           ],
           const SizedBox(height: 16),
           FilledButton(
@@ -168,7 +205,9 @@ class _ResultPanel extends StatelessWidget {
             style: FilledButton.styleFrom(
               backgroundColor: AppColors.accent,
               padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
             ),
             child: const Text('Escanear siguiente'),
           ),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+
 import '../../core/auth_state.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/pressable_button.dart';
@@ -57,12 +58,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
     });
     try {
       await context.read<AuthState>().register(
-            email: _emailController.text.trim(),
-            password: _passwordController.text,
-            firstName: _firstNameController.text.trim(),
-            lastName: _lastNameController.text.trim(),
-            birthDate: _birthDate!,
-          );
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+        firstName: _firstNameController.text.trim(),
+        lastName: _lastNameController.text.trim(),
+        birthDate: _birthDate!,
+      );
       if (mounted) context.go('/events');
     } on AuthException catch (e) {
       setState(() => _error = e.message);
@@ -96,11 +97,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const SizedBox(height: 8),
-                Text('Crear cuenta', style: Theme.of(context).textTheme.displayLarge),
+                Text(
+                  'Crear cuenta',
+                  style: Theme.of(context).textTheme.displayLarge,
+                ),
                 const SizedBox(height: 8),
                 Text(
                   'Regístrate para empezar a comprar boletos',
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: AppColors.inkSoft),
+                  style: Theme.of(context).textTheme.bodyLarge
+                      ?.copyWith(color: AppColors.inkSoft),
                 ),
                 const SizedBox(height: 32),
                 Row(
@@ -110,7 +115,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         controller: _firstNameController,
                         textCapitalization: TextCapitalization.words,
                         decoration: const InputDecoration(labelText: 'Nombre'),
-                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Obligatorio' : null,
+                        validator: (v) => (v == null || v.trim().isEmpty)
+                            ? 'Obligatorio'
+                            : null,
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -118,8 +125,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       child: TextFormField(
                         controller: _lastNameController,
                         textCapitalization: TextCapitalization.words,
-                        decoration: const InputDecoration(labelText: 'Apellido'),
-                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Obligatorio' : null,
+                        decoration: const InputDecoration(
+                          labelText: 'Apellido',
+                        ),
+                        validator: (v) => (v == null || v.trim().isEmpty)
+                            ? 'Obligatorio'
+                            : null,
                       ),
                     ),
                   ],
@@ -128,11 +139,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 GestureDetector(
                   onTap: _pickBirthDate,
                   child: InputDecorator(
-                    decoration: const InputDecoration(labelText: 'Fecha de nacimiento'),
+                    decoration: const InputDecoration(
+                      labelText: 'Fecha de nacimiento',
+                    ),
                     child: Text(
-                      _birthDate == null ? 'Selecciona una fecha' : dateFormat.format(_birthDate!),
+                      _birthDate == null
+                          ? 'Selecciona una fecha'
+                          : dateFormat.format(_birthDate!),
                       style: TextStyle(
-                        color: _birthDate == null ? AppColors.inkSoft : AppColors.ink,
+                        color: _birthDate == null
+                            ? AppColors.inkSoft
+                            : AppColors.ink,
                         fontSize: 16,
                       ),
                     ),
@@ -143,14 +160,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
                   decoration: const InputDecoration(labelText: 'Email'),
-                  validator: (v) => (v == null || !v.contains('@')) ? 'Email inválido' : null,
+                  validator: (v) =>
+                      (v == null || !v.contains('@')) ? 'Email inválido' : null,
                 ),
                 const SizedBox(height: 14),
                 TextFormField(
                   controller: _passwordController,
                   obscureText: true,
-                  decoration: const InputDecoration(labelText: 'Contraseña (mínimo 8 caracteres)'),
-                  validator: (v) => (v == null || v.length < 8) ? 'Mínimo 8 caracteres' : null,
+                  decoration: const InputDecoration(
+                    labelText: 'Contraseña (mínimo 8 caracteres)',
+                  ),
+                  validator: (v) => (v == null || v.length < 8)
+                      ? 'Mínimo 8 caracteres'
+                      : null,
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: 14),

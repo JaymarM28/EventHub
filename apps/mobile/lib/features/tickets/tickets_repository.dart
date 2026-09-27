@@ -1,3 +1,5 @@
+import 'package:dio/dio.dart';
+
 import '../../core/api_client.dart';
 import 'ticket_models.dart';
 
@@ -7,6 +9,17 @@ import 'ticket_models.dart';
 class TicketNotReadyException implements Exception {
   @override
   String toString() => 'El boleto está tardando más de lo esperado en emitirse';
+}
+
+/// El backend rechaza la transferencia con mensajes específicos (email sin
+/// cuenta, boleto ya usado, no puedes transferirte a ti mismo) — se
+/// propagan tal cual en vez de un error genérico.
+class TransferTicketException implements Exception {
+  TransferTicketException(this.message);
+  final String message;
+
+  @override
+  String toString() => message;
 }
 
 class TicketsRepository {
@@ -43,5 +56,34 @@ class TicketsRepository {
       await Future.delayed(interval);
     }
     throw TicketNotReadyException();
+  }
+
+  /// Fase E: etiqueta informativa ("para quién es" este boleto dentro de
+  /// una compra grupal) — no cambia el dueño real, solo el nombre mostrado.
+  Future<TicketModel> assign(String ticketId, String name) async {
+    final response = await _apiClient.dio.patch(
+      '/tickets/$ticketId/assign',
+      data: {'name': name},
+    );
+    return TicketModel.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Fase E: transferencia real de dueño — a diferencia de [assign], el
+  /// boleto deja de aparecer en "Mis boletos" de quien lo transfiere.
+  /// El backend responde 404 si el email no tiene cuenta y 400 si el
+  /// boleto ya fue usado; ambos llegan tal cual vía DioException.
+  Future<void> transfer(String ticketId, String toEmail) async {
+    try {
+      await _apiClient.dio.patch(
+        '/tickets/$ticketId/transfer',
+        data: {'toEmail': toEmail},
+      );
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      final message = (data is Map && data['message'] != null)
+          ? data['message'].toString()
+          : 'No se pudo conectar con el servidor';
+      throw TransferTicketException(message);
+    }
   }
 }

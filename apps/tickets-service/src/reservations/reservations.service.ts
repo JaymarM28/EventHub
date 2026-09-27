@@ -50,8 +50,10 @@ export class ReservationsService {
     // Precio UNITARIO — orders-service multiplica por la cantidad. Incluir
     // esto evita que orders-service tenga que llamar a events-service por
     // separado solo para calcular el monto a cobrar — tickets-service ya
-    // tiene su propia copia sincronizada (ZonesConsumer).
-    return { ...hold, zoneId, quantity, price: Number(zone.price) };
+    // tiene su propia copia sincronizada (ZonesConsumer). `currency` viaja
+    // igual (Fase D, #20) — orders-service la necesita para crear el
+    // PaymentIntent de Stripe en la moneda correcta.
+    return { ...hold, zoneId, quantity, price: Number(zone.price), currency: zone.currency };
   }
 
   async release(reservationId: string): Promise<void> {

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+
 import '../../core/auth_state.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/pressable_button.dart';
@@ -34,7 +35,10 @@ class _LoginScreenState extends State<LoginScreen> {
       _error = null;
     });
     try {
-      await context.read<AuthState>().login(_emailController.text.trim(), _passwordController.text);
+      await context.read<AuthState>().login(
+        _emailController.text.trim(),
+        _passwordController.text,
+      );
       if (mounted) context.go('/events');
     } on AuthException catch (e) {
       setState(() => _error = e.message);
@@ -77,28 +81,39 @@ class _LoginScreenState extends State<LoginScreen> {
                     borderRadius: BorderRadius.circular(16),
                   ),
                   alignment: Alignment.center,
-                  child: const Icon(Icons.confirmation_number_rounded, color: Colors.white, size: 26),
+                  child: const Icon(
+                    Icons.confirmation_number_rounded,
+                    color: Colors.white,
+                    size: 26,
+                  ),
                 ),
                 const SizedBox(height: 24),
-                Text('Bienvenido de vuelta', style: Theme.of(context).textTheme.displayLarge),
+                Text(
+                  'Bienvenido de vuelta',
+                  style: Theme.of(context).textTheme.displayLarge,
+                ),
                 const SizedBox(height: 8),
                 Text(
                   'Inicia sesión para comprar boletos',
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: AppColors.inkSoft),
+                  style: Theme.of(context).textTheme.bodyLarge
+                      ?.copyWith(color: AppColors.inkSoft),
                 ),
                 const SizedBox(height: 36),
                 TextFormField(
                   controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
                   decoration: const InputDecoration(labelText: 'Email'),
-                  validator: (v) => (v == null || !v.contains('@')) ? 'Email inválido' : null,
+                  validator: (v) =>
+                      (v == null || !v.contains('@')) ? 'Email inválido' : null,
                 ),
                 const SizedBox(height: 14),
                 TextFormField(
                   controller: _passwordController,
                   obscureText: true,
                   decoration: const InputDecoration(labelText: 'Contraseña'),
-                  validator: (v) => (v == null || v.length < 8) ? 'Mínimo 8 caracteres' : null,
+                  validator: (v) => (v == null || v.length < 8)
+                      ? 'Mínimo 8 caracteres'
+                      : null,
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: 14),
@@ -110,7 +125,11 @@ class _LoginScreenState extends State<LoginScreen> {
                   loading: _loading,
                   child: const Text('Ingresar'),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 4),
+                TextButton(
+                  onPressed: () => context.push('/forgot-password'),
+                  child: const Text('¿Olvidaste tu contraseña?'),
+                ),
                 TextButton(
                   onPressed: () => context.go('/register'),
                   child: const Text('¿No tienes cuenta? Regístrate'),

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_theme.dart';
+
 /// Feedback en el frame del touch-down, no en `onTap` (DESIGN_SYSTEM.md
 /// §1) — esperar a que el gesto termine para mostrar cualquier respuesta
 /// visual se siente muerto. `onPressed: null` deshabilita sin quitar el
@@ -45,15 +47,30 @@ class _PressableButtonState extends State<PressableButton> {
           width: double.infinity,
           padding: const EdgeInsets.symmetric(vertical: 16),
           decoration: BoxDecoration(
-            color: enabled ? colors.primary : colors.primary.withValues(alpha: 0.4),
-            borderRadius: BorderRadius.circular(14),
+            gradient: enabled ? AppGradients.accent : null,
+            color: enabled ? null : colors.primary.withValues(alpha: 0.25),
+            // Pill completo (no solo esquinas redondeadas) — el detalle
+            // "premium" del redisño 2026-09-25, junto con el degradé.
+            borderRadius: BorderRadius.circular(999),
+            boxShadow: enabled
+                ? [
+                    BoxShadow(
+                      color: AppColors.accent.withValues(alpha: 0.35),
+                      blurRadius: 20,
+                      offset: const Offset(0, 8),
+                    ),
+                  ]
+                : null,
           ),
           alignment: Alignment.center,
           child: widget.loading
               ? SizedBox(
                   height: 20,
                   width: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: colors.onPrimary),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: colors.onPrimary,
+                  ),
                 )
               : DefaultTextStyle(
                   style: TextStyle(

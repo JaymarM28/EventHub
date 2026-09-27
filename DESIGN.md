@@ -285,52 +285,804 @@ orden por dependencia real, no por importancia):**
 
 *Fase B — infraestructura de comunicación real (base técnica de lo que sigue):*
 
-15. **Notificaciones reales**: reemplazar el envío simulado de
-    notifications-service por un proveedor de email de verdad (Resend/
-    SendGrid/Postmark) — al comprador (confirmación de compra, boleto) y
-    al organizador (aviso de venta nueva).
-16. **Verificación de email** al registrarse — depende de #15 (hay que
-    poder mandar el correo).
-17. **Recuperación de contraseña** — depende de #15, mismo módulo de auth
-    que #16, se hacen juntas.
+15. ✅ **Notificaciones reales**: reemplazado el envío simulado por
+    Resend real (decidido con el usuario — dominio propio ya verificado,
+    `jmalphatech.com`). Cambios de fondo:
+    - `NotificationsService.notify()` invertido de orden respecto a la
+      versión simulada: ahora envía el email PRIMERO y marca
+      `ProcessedEvent` DESPUÉS — si se hiciera al revés, un fallo de
+      Resend a mitad de camino dejaría el evento como "procesado" sin
+      haber enviado nada, y nunca se reintentaría (ver comentario en el
+      archivo para el trade-off aceptado: duplicado raro > email perdido).
+    - Cada `order.paid` ahora dispara DOS notificaciones independientes
+      (comprador Y organizador — "aviso de venta nueva" que faltaba).
+      Requirió claves de idempotencia separadas (`eventId:buyer` /
+      `eventId:organizer`) porque `ProcessedEvent` usa el eventId como PK
+      — con la misma clave, la segunda notificación se hubiera visto
+      como "ya procesada" por la primera.
+    - notifications-service es la PRIMERA vez que un consumidor de
+      RabbitMQ (sin request de usuario final en curso) necesita llamar a
+      otro servicio interno — se resolvió firmando su propio contexto
+      interno de identidad "sistema" con `signInternalContext` (mismo
+      mecanismo de confianza que usa api-gateway, ver
+      `users-client.service.ts` / `events-client.service.ts`).
+    - Nuevo endpoint interno `GET /internal/users/:id` en auth-service
+      (userId → email) y `GET /internal/zones/:zoneId` en events-service
+      (zoneId → eventId/organizerId, ninguno de los dos expuesto por el
+      gateway).
+    - Verificado con `scripts/e2e-check.sh` (29/29) y con un email real
+      enviado a la cuenta del usuario vía la API de Resend directamente.
+
+    **Rediseño del correo de compra (2026-09-26, feedback del usuario:
+    "ese correo que se envía está muy feo")** — los correos de "Confirmamos
+    tu pago" y "¡Tu boleto está listo!" mostraban el `orderId`/`ticketId`
+    en crudo (UUID) en un párrafo plano, sin ningún detalle del evento.
+    - `GET /internal/zones/:zoneId` (events-service) ahora también
+      devuelve `venue`/`city`/`startsAt`/`currency`/`zoneName`/`zonePrice`
+      — antes solo traía `eventId`/`eventTitle`/`organizerId`. Se agregó
+      ahí (no un endpoint nuevo en orders-service) porque
+      notifications-service ya hacía este salto para el aviso al
+      organizador; un solo request sirve para ambos correos.
+    - `renderTicketDetails()` nuevo en `email-template.ts` — reemplaza el
+      párrafo plano por una tarjeta con el nombre del evento, fecha/hora
+      (formateada en español, zona horaria Bogotá), lugar, zona, cantidad
+      y total pagado. Usado tanto en "Confirmamos tu pago" (con la
+      cantidad real de la orden) como en "¡Tu boleto está listo!"
+      (cantidad 1, ese evento es por-boleto).
+    - `renderEmailHtml()` se actualizó al morado de marca de la Fase F
+      (`#7C6FF0`/`#9B90F5` en gradiente, antes `#5b4fe9` de antes del
+      rediseño) — el fondo del cuerpo se mantiene CLARO a propósito, no el
+      oscuro `#0D0D12` de la app: el soporte de dark mode en clientes de
+      email es inconsistente. De paso se sacó el `<p>` que envolvía el
+      `body` a ciegas — rompía HTML válido en los correos de
+      auth-service (verificación/reset), que ya mandaban su propio HTML
+      con botón/código, y no habría servido para envolver la tabla nueva.
+    - `OrderPaidPayload` ganó el campo `quantity` (ya viajaba en el
+      evento real desde orders-service, pero la interfaz del consumer no
+      lo declaraba). Tests actualizados en `events.service.spec.ts` y
+      `notifications.consumer.spec.ts`. Verificado con `npx jest` en
+      ambos servicios y build limpio.
+16. ✅ **Verificación de email** al registrarse — `User.emailVerifiedAt`
+    (nullable, no bloquea login ni compra todavía — solo se registra).
+    `POST /auth/register` genera un `EmailVerificationToken` (hash
+    guardado, igual que RefreshToken) y dispara un email con un link a
+    `GET /auth/verify-email?token=...`. Ese endpoint es el único de
+    auth-service que responde HTML en vez de JSON — se abre desde el
+    cliente de correo, no desde la app, así que necesita algo legible
+    para un humano. El token se BORRA al usarse (no solo se marca), a
+    diferencia de RefreshToken no tiene ningún valor de auditoría después.
+    Verificado insertando un token de prueba a mano y llamando al
+    endpoint real — confirmado que marca `emailVerifiedAt` y borra el
+    token.
+17. ✅ **Recuperación de contraseña** — mismo módulo de auth que #16, pero
+    con una decisión de diseño distinta: en vez de un link (no hay página
+    web a la que llevar), el email manda un CÓDIGO de 6 dígitos que el
+    usuario tipea en la app (`PasswordResetToken`, TTL 30min, más corto
+    que el de verificación por ser más sensible). `POST
+    /auth/forgot-password` nunca revela si el email existe (mismo
+    criterio anti-enumeración que login) — responde el mismo mensaje
+    siempre. `POST /auth/reset-password` también da el mismo error
+    genérico para "email no existe", "código incorrecto" y "código
+    expirado/usado", y al resetear revoca TODOS los refresh tokens
+    existentes (mismo principio que la detección de reuso: cambiar la
+    contraseña corta cualquier sesión que alguien más pudiera tener).
+    Nueva pantalla Flutter `ForgotPasswordScreen` (dos pasos en la misma
+    pantalla: pedir email → pedir código+nueva contraseña), link "¿Olvidaste
+    tu contraseña?" en login. Verificado con un código real enviado a la
+    cuenta del usuario vía Resend (confirmado en el log del servicio).
+
+    Estructura común a #16/#17: notifications-service ganó un endpoint
+    interno genérico `POST /internal/emails` (a diferencia de
+    order.paid/ticket.issued, que son eventos de dominio vía RabbitMQ,
+    esto es una acción síncrona iniciada por un usuario — no vale la pena
+    construir outbox/RMQ para dos casos puntuales). Como
+    `POST /auth/register` y `/forgot-password` son endpoints PÚBLICOS
+    (authMode 'public' en el gateway, a propósito — no se puede exigir
+    sesión para registrarse), auth-service tuvo que firmar su PROPIO
+    contexto interno de identidad "sistema" con `signInternalContext`
+    para poder llamar a notifications-service — mismo mecanismo que ya
+    usa notifications-service para llamar a auth-service/events-service
+    (Fase B #15).
 
 *Fase C — ganancias rápidas, sin dependencias, buen respiro antes de la fase D:*
 
-18. **Mapas de las locaciones** del evento (geocoding + embed de mapa).
-19. **Búsqueda y filtros de eventos** (ciudad, fecha, categoría, precio).
+18. ✅ **Mapas de las locaciones** del evento (geocoding + embed de mapa,
+    implementado 2026-09-26). Decisión clave: OpenStreetMap en vez de
+    Google Maps — sin API key ni cuenta de facturación, mismo criterio
+    que eligió Mercado Pago sobre Stripe (evitar fricción de cuenta
+    comercial para una feature que no lo amerita).
+    - `Event.latitude`/`longitude` (`Float?`, nullable) en
+      `events-service/prisma/schema.prisma`, migración `event_geocoding`.
+      Nunca los tipea el organizador a mano.
+    - `GeocodingService` nuevo (`events-service/src/events/geocoding.service.ts`):
+      llama a la API pública de Nominatim (OpenStreetMap) con `venue,
+      city` como query, sin API key. Best-effort SIEMPRE — cualquier
+      fallo (red, sin resultados, rate limit) devuelve `null` y el evento
+      se crea/actualiza igual, sin coordenadas y sin mapa. `EventsService.create`
+      geocodifica siempre; `update` solo re-geocodifica si `venue` o
+      `city` cambiaron (para no gastar el rate-limit de Nominatim —
+      ~1 req/seg — en ediciones que no mueven la ubicación).
+    - App Flutter: `EventModel.latitude`/`longitude` nuevos.
+      `_EventMap` (nuevo widget en `event_detail_screen.dart`, paquetes
+      `flutter_map`+`latlong2`, sin API key) muestra un preview NO
+      interactivo (`InteractiveFlag.none` — el mapa no compite con el
+      scroll de la pantalla) con un marcador en la ubicación; tocarlo
+      abre la app nativa de mapas del dispositivo (`geo:` en Android vía
+      `url_launcher`, con fallback a la URL web de Apple Maps en iOS,
+      que no tiene handler nativo para `geo:`). Requirió agregar un
+      `<queries>` de `android.intent.action.VIEW` con `data
+      android:scheme="geo"` al `AndroidManifest.xml` — sin esto,
+      `canLaunchUrl` da `false` siempre en Android 11+ por package
+      visibility. Sección "Ubicación" nueva en el detalle, solo visible
+      si el evento tiene coordenadas.
+    - Admin panel: `EventItem.latitude`/`longitude` agregados al tipo
+      (solo lectura, no hay campo para editarlos — se calculan solos).
+    - Verificado: Nominatim geocodificó correctamente "Estadio El
+      Campín, Bogotá" desde curl directo; tests de `events.service.spec.ts`
+      actualizados con el nuevo provider mockeado (25/25 verde);
+      `flutter analyze`/`flutter test` verdes; coordenadas de prueba
+      cargadas a mano en un evento de desarrollo para verificación visual
+      en el iPhone.
+
+    **Ajuste post-verificación (feedback del usuario, mismo día):** pidió
+    dos cosas más — mostrar la dirección, y poder elegir abrir con Google
+    Maps o Waze (no solo el mapa por defecto del sistema).
+    - `Event.address` (`String?`) nuevo, migración `event_address` —
+      guarda el `display_name` completo que devuelve Nominatim (más
+      preciso que "venue, city" tipeado por el organizador), propagado
+      por `GeocodingService`/`EventsService` igual que lat/lng.
+    - `_EventMap` ahora muestra la dirección como texto arriba del mapa
+      (`_InfoRow`), y al tocar el mapa abre una hoja (`_showMapPicker`)
+      con tres opciones: Google Maps, Waze, Apple Maps. Las tres usan
+      enlaces universales `https://` (`google.com/maps/search`,
+      `waze.com/ul`, `maps.apple.com`) en vez de esquemas custom
+      (`comgooglemaps://`, `waze://`) — funcionan con o sin la app
+      instalada (si no está, resuelve por navegador o tienda de apps),
+      así que no hizo falta declarar `LSApplicationQueriesSchemes` nuevos
+      en iOS ni más `<queries>` en Android.
+19. ✅ **Búsqueda y filtros de eventos** (ciudad, fecha, categoría, precio).
+    `Event` no tenía ni ciudad ni categoría (solo `venue` en texto libre) —
+    se agregaron ambos campos nullable (eventos viejos simplemente no
+    matchean un filtro, sin backfill inventado), con `category` como enum
+    fijo (`MUSICA/DEPORTES/TEATRO/CONFERENCIA/FESTIVAL/OTRO`) en vez de
+    texto libre para que sea filtrable de verdad. `CreateEventDto` los
+    exige de acá en adelante. `GET /events` acepta `city` (case-
+    insensitive), `category`, `fromDate`/`toDate` y `maxPrice` — todos
+    opcionales y combinables, `maxPrice` filtra por "el evento tiene
+    ALGUNA zona a ese precio o menos" (no el precio promedio), ya que un
+    evento puede tener varias zonas de precios distintos. Admin panel
+    (React) actualizado para pedir ciudad/categoría al crear o editar un
+    evento — si no, no habría manera de poblar los datos que la búsqueda
+    necesita. App Flutter: hoja de filtros (ciudad, categoría con chips,
+    precio máximo) sobre la lista de eventos — quedó afuera el filtro de
+    fecha en la UI (el backend sí lo soporta) para no sumar la fricción de
+    un date-range picker a esta primera versión. Verificado con
+    `scripts/e2e-check.sh` (31/31, incluye 2 checks nuevos: un filtro que
+    debe encontrar el evento y uno que debe excluirlo).
 
 *Fase D — dinero real:*
 
-20. **Pagos reales** con un proveedor que ofrezca sandbox (Stripe es el
-    candidato natural). Es el ítem más grande de todos.
+20. ✅ **Pagos reales** — resuelto con Wompi (ver migración abajo, y el
+    historial de decisiones que llevó hasta ahí):
+    - Stripe no opera en Colombia — se descartó apenas se intentó crear la
+      cuenta. Se evaluaron Wompi/ePayco/Mercado Pago; se eligió **Mercado
+      Pago** (Checkout Pro) porque permite credenciales de prueba sin NIT
+      ni empresa, con una cuenta personal.
+    - Implementado: `orders-service` crea una Preferencia (no cobra
+      sincrónico) → devuelve `checkoutUrl` → la app abre un WebView
+      (`webview_flutter`, sin SDK nativo porque Mercado Pago no tiene uno
+      para Flutter) → el pago se confirma después vía
+      `POST /orders/webhooks/mercadopago`, que NUNCA confía en el body de
+      la notificación — siempre re-consulta el pago a la API de Mercado
+      Pago con el access token antes de marcar algo como pagado.
+    - `Order` ahora tiene `currency` (default COP, decisión explícita del
+      usuario de no fijarlo en código — "por ahora COP pero según la
+      región" — vive en `Event.currency`, viaja hasta la orden vía la
+      reserva) y `mercadoPagoPreferenceId`/`mercadoPagoPaymentId`.
+    - En desarrollo, Mercado Pago no puede llamar a localhost/una IP LAN
+      — se resolvió con un túnel público (`cloudflared`, gratis, sin
+      cuenta) apuntando al gateway; `API_PUBLIC_URL`/`WEBHOOK_PUBLIC_URL`
+      apuntan ahí. El túnel es efímero (cambia si se reinicia
+      `cloudflared` o si la Mac durmió), hay que regenerarlo y actualizar
+      esas dos variables cada vez.
+    - **Bloqueado**: un pago de prueba real completado en el checkout de
+      Mercado Pago siempre falla con "Algo anda mal" — SIN crear ningún
+      registro de pago del lado de Mercado Pago (confirmado consultando
+      `/v1/payments/search` directo a su API). Se descartaron como causa:
+      credenciales mal emparejadas, email/cédula del pagador faltante,
+      comprador no logueado. Se probó logueando como un segundo usuario
+      de prueba comprador (creado vía `POST /users/test_user`, distinto
+      del vendedor) y falló igual. Es un problema de configuración de
+      cuenta/sandbox de Mercado Pago que no se pudo diagnosticar más sin
+      soporte de ellos — decisión del usuario (2026-09-22): pausar esto y
+      seguir con otro ítem del roadmap. `scripts/e2e-check.sh` simula lo
+      que haría el webhook real (`simulate_payment_confirmed`, ver el
+      script) para poder seguir probando todo lo que pasa DESPUÉS del
+      pago (emisión de boletos, notificaciones, control de acceso) sin
+      depender de completar un pago real cada vez.
+
+    **Migración a Wompi (2026-09-26)** — decisión del usuario de reintentar
+    con otro proveedor en vez de seguir insistiendo con soporte de Mercado
+    Pago. Se reconsideró Wompi/ePayco (descartados la primera vez por
+    "requieren empresa") tras verificar en su documentación actual que
+    **persona natural sin Cámara de Comercio** alcanza (cédula + RUT +
+    cuenta bancaria a nombre propio) y que las llaves de sandbox están
+    disponibles apenas se crea la cuenta, sin esperar aprobación. Se
+    reemplazó Mercado Pago por **Wompi** (Bancolombia):
+    - `MercadoPagoClientService` → `WompiClientService` (nuevo archivo,
+      el viejo se borró). Diferencia clave de arquitectura: el
+      Widget/Checkout Web de Wompi es una URL FIRMADA que se arma 100%
+      local (`SHA256(reference + amountInCents + currency +
+      integritySecret)`) — a diferencia de Checkout Pro de Mercado Pago,
+      NO hace falta ninguna llamada de red para iniciar un checkout, solo
+      para confirmar el pago después. Esto simplificó `OrdersService.checkout()`:
+      ya no puede fallar por una llamada a la pasarela, solo por la
+      reserva en tickets-service.
+    - Webhook de eventos de Wompi (`POST /orders/webhooks/wompi`) trae la
+      transacción completa embebida (a diferencia del `{type, data:{id}}`
+      liviano de Mercado Pago), pero el principio de confianza es el
+      mismo — nunca alcanza con el body: primero se verifica un checksum
+      criptográfico (`WompiClientService.verifyEventChecksum`,
+      `SHA256(valores de signature.properties + timestamp + eventsSecret)`,
+      documentado por Wompi) como defensa en profundidad, y DESPUÉS
+      igual se re-consulta la transacción a la API de Wompi con el
+      access token antes de marcar algo como pagado — el mismo patrón
+      "nunca confiar en el body" que ya regía con Mercado Pago, ahora con
+      una capa extra de verificación criptográfica que MP no ofrecía.
+    - El `redirect-url` del checkout de Wompi solo agrega `?id=<transactionId>`
+      y deja que el comercio decida qué página mostrar (a diferencia de
+      Mercado Pago, que redirige directo a success/failure/pending) — se
+      agregó `GET /orders/checkout-return/wompi` que re-consulta esa
+      transacción (best-effort, solo para elegir la página; la
+      confirmación real de pago sigue siendo exclusivamente el webhook) y
+      redirige a las mismas tres páginas de siempre — la app NO necesitó
+      ningún cambio de código para esto, sigue detectando el regreso por
+      el mismo path `/orders/checkout-return/:outcome`.
+    - `Order.wompiTransactionId` (nullable, único) nuevo; los campos
+      `mercadoPagoPreferenceId`/`mercadoPagoPaymentId` se dejaron
+      (nullable, sin backfill, mismo criterio que city/category en Fase
+      C) para no perder trazabilidad de las órdenes viejas.
+    - A diferencia de Mercado Pago, Wompi NO recibe la URL del webhook
+      como parámetro del checkout — se configura UNA VEZ a mano en su
+      dashboard ("Eventos" → URL de eventos). Sigue haciendo falta un
+      túnel público en desarrollo (mismo `cloudflared`, mismo problema de
+      que es efímero) porque Wompi tampoco puede llamar a localhost/LAN.
+    - Verificado: `npx jest` (16/16) y build limpio de `orders-service`;
+      checkout real contra el gateway devolvió una URL de Wompi con firma
+      válida; **pago de prueba real completado en el WebView de la app**
+      (tarjeta `4242 4242 4242 4242`) — la orden quedó `PAID`, el boleto
+      se emitió (confirmado en `tickets_db`), y `order.paid` se publicó al
+      outbox sin errores.
+    - **Bug encontrado y corregido en el mismo ciclo**: Wompi marcaba el
+      webhook como "error" en su dashboard de eventos aunque el pago SÍ se
+      procesaba bien de nuestro lado — `@Post` en NestJS responde 201 por
+      default, y Wompi exige exactamente 200. Se agregó
+      `@HttpCode(200)` explícito en `wompiWebhook`. Confirmado con el
+      usuario que el error desapareció del dashboard de Wompi tras el fix.
+    - **Pagos reales end-to-end funcionando, confirmado por el usuario
+      (2026-09-26).**
+    - **Segundo bug encontrado por el usuario, mismo día**: al rechazarse
+      un pago, la app se quedaba en "Emitiendo tu boleto…" y terminaba en
+      un timeout ("el boleto está tardando más de lo esperado"). Causa
+      real: `PaymentWebViewScreen._outcomeFromUrl` interceptaba CUALQUIER
+      navegación que contuviera el prefijo `/orders/checkout-return/` —
+      pero el `redirect-url` real de Wompi es
+      `/orders/checkout-return/wompi` (el endpoint intermedio que decide
+      entre success/failure/pending y hace un 302), que TAMBIÉN matchea
+      ese prefijo. La navegación se interceptaba ahí mismo, antes de que
+      el 302 del backend llegara a pintar nada — el WebView nunca dejaba
+      pasar la request, así que el backend nunca llegaba a decidir el
+      resultado real, y el fallback devolvía siempre `pending`, que el
+      sheet trataba igual que un pago aprobado (pollea tickets → timeout).
+      Se corrigió matcheando el SUFIJO exacto (`/success`, `/failure`,
+      `/pending`) en vez del prefijo, y dejando pasar cualquier otra
+      navegación (`return null`) para que el 302 del backend se resuelva
+      solo. De paso se separó el caso `PaymentOutcome.pending` real (ej.
+      PSE/transferencia, que no confirma al instante) para mostrar un
+      mensaje informativo en vez de pollear tickets que todavía no
+      existen — mismo bug de fondo, distinto disparador.
 21. **Payouts al organizador** (Stripe Connect) — depende de #20, no hay
     qué pagarle al organizador sin dinero real entrando primero.
 22. **Reembolsos/cancelaciones** (`event.cancelled` → `order.refunded` →
     reversión de boleto) — depende de #20 (no hay qué reembolsar sin un
     pago real) y de #14 (una orden con varios boletos complica un
     reembolso parcial).
-23. **Códigos de descuento/promociones** — depende de #20, se aplican
-    sobre el monto real cobrado.
+23. ✅ **Códigos de descuento/promociones** (implementado 2026-09-26) —
+    depende de #20 (se aplican sobre el monto real cobrado, ya resuelto).
+    Alcance elegido con el usuario: porcentaje O monto fijo, límite de
+    usos configurable, **por evento** (nunca global — acota el "blast
+    radius" de un código filtrado/abusado a un solo evento).
+    - Modelo `DiscountCode` nuevo en events-service (no en orders-service:
+      lo crea el organizador, junto a `Event`/`Zone`), único por
+      `(eventId, code)` — el mismo texto de código puede existir en dos
+      eventos distintos sin chocar. `maxUses` nullable = ilimitado.
+    - Canje ATÓMICO (`redeemDiscountCode`): `SELECT ... FOR UPDATE`
+      dentro de una transacción, mismo patrón que la reserva de zonas en
+      tickets-service — dos checkouts concurrentes usando el último cupo
+      del código nunca dejan `usedCount > maxUses` (verificado con test
+      "GARANTÍA"). Nuevo endpoint interno
+      `POST /internal/zones/:zoneId/redeem-discount`, llamado por
+      orders-service durante el checkout (nuevo `EventsClientService` ahí,
+      mismo patrón de reenvío de header que `TicketsClientService`).
+    - `OrdersService.checkout()`: si el código es inválido/agotado, se
+      libera la reserva recién adquirida y se rechaza el checkout entero
+      (mismo criterio que un fallo de pago) — nunca se crea una orden a
+      medias. `Order.discountCode`/`discountAmount` nuevos (nullable,
+      solo trazabilidad — el canje real vive en events-service).
+    - Admin panel: sección "Códigos de descuento" en el detalle del
+      evento (crear, listar con usos/estado, activar/desactivar — sin
+      edición de tipo/valor una vez creado, a propósito: evita cambiar
+      las reglas de un código a mitad de canje).
+    - App Flutter: campo "Código de descuento (opcional)" en el sheet de
+      compra: un código inválido muestra el error del backend tal cual
+      (ej. "Código de descuento inválido"); uno válido sigue el flujo
+      normal con el monto ya descontado (visible en la propia página de
+      Wompi antes de pagar).
+    - **Bug encontrado en la verificación end-to-end**: el primer intento
+      con un código válido dio 500 — `prisma generate` nunca se había
+      corrido en orders-service después de la migración (`npm run build`
+      compila TypeScript, pero no regenera el cliente Prisma; solo
+      `migrate dev`/`generate` lo hacen). El Prisma Client seguía sin
+      conocer `discountCode`/`discountAmount`. Corregido corriendo
+      `npx prisma generate` a mano. Verificado end-to-end con curl real:
+      evento con zona a $100.000 + código de 20% → orden en $80.000,
+      `usedCount` incrementado a 1/2, URL de Wompi firmada con el monto
+      ya descontado. Tests unitarios en ambos servicios verdes (38/38
+      events-service, 20/20 orders-service).
 
 *Fase E — gestión de boletos y pulido final:*
 
-24. **Pantalla "Mis boletos"** (app Flutter) — hoy un boleto solo se ve en
+24. ✅ **Pantalla "Mis boletos"** (app Flutter) — hoy un boleto solo se ve en
     el momento de comprarlo; al cerrar esa pantalla no hay forma de
     volver a verlo, aunque `GET /tickets/mine` ya lo tiene guardado.
     Fundacional para todo lo que sigue en esta fase — no tiene sentido
     transferir o asignar un boleto desde una pantalla que no existe.
-25. **Transferencia de boleto** entre usuarios — depende de #24 y de #14
-    (varios boletos por orden, ya resuelto).
-26. **Asignar boletos de una compra grupal** — si compraste 4 para ir con
+    Implementado y verificado en el iPhone: `MyTicketsScreen` agrupa
+    los boletos por EVENTO primero y, dentro de cada evento, por orden/
+    zona — se detectó en vivo que agrupar solo por `orderId` dejaba
+    compras de zonas distintas del mismo evento en tarjetas separadas
+    y desconectadas visualmente (bug reportado: "no hay organizacion,
+    las que compro en conjunto"), así que se corrigió a un card por
+    evento con una fila por compra/zona dentro.
+
+    **Separación Activos/Históricos (2026-09-26, pedido del usuario)** —
+    `MyTicketsScreen` pasó a `DefaultTabController` con dos tabs
+    ("Activos"/"Históricos"), split por `event.startsAt` (mismo criterio
+    que oculta eventos vencidos en el listado principal, ver
+    `event_list_screen.dart`): un evento que ya pasó es historial, no
+    algo para "usar" en la puerta. Activos ordenados ascendente (el más
+    próximo primero); históricos descendente (el más reciente primero).
+    `_TicketsList` nuevo (widget compartido entre ambos tabs, cada uno
+    con su propio `RefreshIndicator` y mensaje vacío). Verificado con
+    `flutter analyze`/`flutter test`.
+26. ✅ **Asignar boletos de una compra grupal** — si compraste 4 para ir con
     amigos, ponerle el nombre de cada amigo a cada boleto. Más liviano que
     #25: no cambia el dueño de la cuenta, solo una etiqueta visual sobre
-    cuál boleto es de quién. Mismo módulo que #25, depende de #24.
+    cuál boleto es de quién (`Ticket.assignedToName`, nuevo endpoint
+    `PATCH /tickets/:id/assign` verificado ownerId===userId). Verificado
+    en el iPhone: en un boleto de una compra con `quantity>1`, aparece
+    "Asignar a un amigo" debajo del precio; al guardar un nombre se ve
+    "Para: <nombre>" en esa página del `PageView`.
+25. ✅ **Transferencia de boleto** entre usuarios — depende de #24 y de #14
+    (varios boletos por orden, ya resuelto). Implementado: reasigna
+    `Ticket.userId` (a diferencia de `assignTo`, que solo etiqueta).
+    Requiere que el destinatario ya tenga cuenta (sin invitación por email
+    real todavía — Fase B); rechaza transferir un boleto ya usado o a uno
+    mismo. Nuevo endpoint interno `GET /internal/users/by-email` en
+    auth-service (llamado por tickets-service, primera vez que
+    tickets-service llama a otro servicio síncronamente) + `PATCH
+    /tickets/:id/transfer`. Backend verificado con tests unitarios y
+    confirmado en vivo en el iPhone (2026-09-23).
 27. **Pase de Apple/Google Wallet** para el boleto, adicional al QR
     in-app — reusa el mismo `qrToken` firmado que ya existe. Apple Wallet
     requiere cuenta de Apple Developer paga ($99/año).
 28. **Rate limiting en el checkout** — se protege la versión FINAL del
     checkout (después de #14/#20/#23), no una intermedia que todavía va a
     cambiar. Relacionado con el TODO #1 de lock contention en Redis.
+
+42. **Aplicación web para compradores** (decidido con el usuario,
+    2026-09-26) — hasta ahora la única superficie web es el panel de
+    organizador/SUPER_ADMIN (`admin-panel`, #10); no existe ninguna forma
+    de comprar un boleto desde un navegador, solo desde la app Flutter.
+    Alcance elegido: **espejo completo del flujo comprador** — ver
+    eventos (listado, búsqueda/filtros, detalle), comprar (checkout real
+    vía Wompi, mismo flujo de redirección que ya existe en `orders-service`),
+    y "Mis boletos" con el QR para mostrar en el control de acceso.
+    - Nuevo `apps/web` (a definir framework al momento de construir —
+      candidato natural Next.js o el mismo stack Vite+React de
+      `admin-panel` por consistencia, dado que ya se probó y funciona
+      bien en este proyecto) consumiendo el mismo `api-gateway` que ya
+      usan mobile y admin-panel — sin backend nuevo, es un cliente más.
+    - El checkout web NO puede reusar el WebView de Flutter (no aplica en
+      navegador) — en web, el flujo de Wompi es más simple: la propia
+      página de compra redirige directo a `checkout.wompi.co`, sin
+      necesidad de un WebView intermedio (esa complejidad existía solo
+      porque Flutter no tiene SDK nativo de Wompi/Mercado Pago).
+    - El QR de "Mis boletos" en web es solo para MOSTRAR en el control de
+      acceso (ninguna lógica de escaneo se necesita en el navegador —
+      escanear siempre lo hace un dispositivo con cámara, ver #9c).
+    - Login/sesión: mismo `auth-service`, pero con manejo de sesión web
+      (cookie o localStorage con refresh) en vez de `flutter_secure_storage`
+      — decisión de implementación pendiente para cuando se construya.
+    - Sin alcance definido todavía: administración de cuenta, favoritos
+      (#39 es mobile-only por ahora), o el resto del pulido visual de la
+      Fase F — se decide si portarlo o no cuando se llegue a este ítem.
+
+43. **Rediseño y nuevas features del admin panel** (decidido con el
+    usuario, 2026-09-26) — el panel (#10) seguía con la paleta CLARA
+    original (`#5b4fe9` sobre `#faf9f6`), de antes del rediseño oscuro de
+    la app (Fase F); mobile y web se sentían como "dos productos
+    distintos". Orden de trabajo acordado: rediseño primero (construir
+    features nuevas sobre CSS viejo es retrabajo), después dashboard más
+    rico, después reembolsos (#22), después soporte al comprador.
+    - ✅ **Paleta oscura** — `index.css` (`apps/admin-panel/src/index.css`)
+      migrado a los mismos valores exactos de `AppColors` en
+      `app_theme.dart` (`#0D0D12`/`#1A1A22`/`#7C6FF0`/`#9B90F5`, etc.) —
+      todo el panel ya estaba armado sobre variables CSS (`--accent`,
+      `--surface`...), así que el cambio de paleta fue centralizado en un
+      solo lugar; ningún componente tenía colores hardcodeados (verificado
+      con grep). De paso se sumó gradiente + resplandor morado a
+      `.btn-primary` (mismo lenguaje visual que `PressableButton` en
+      Flutter) y botones pill (`border-radius: 999px`). **Confirmado por
+      el usuario** ("cambiaste los colores").
+    - ✅ **Organización visual y tablas** (feedback del usuario: "falta el
+      diseño. La organización, las tablas, etc" — la paleta sola no
+      alcanzaba). Se agregaron patrones nuevos reutilizables en
+      `index.css` y se aplicaron en `AdminPage.tsx`/`EventDetailPage.tsx`/
+      `MyEventsPage.tsx`:
+      - `.stack-lg` (gap 24px) para separar SECCIONES de página, distinto
+        de `.stack` (12px) que usan los campos de un formulario — antes
+        todo compartía el mismo gap chico y todo se sentía apretado por
+        igual, sin jerarquía.
+      - `.page-header`/`.section-header` con un "eyebrow" (etiqueta chica
+        en mayúsculas, ej. "SUPER ADMIN", "ORGANIZADOR") y subtítulos bajo
+        cada `<h2>` explicando qué es esa sección — antes un `<h2>` solo
+        con el nombre no decía nada de contexto.
+      - `.avatar` (círculo con inicial en gradiente morado) para filas de
+        persona (organizadores, usuarios, staff) — mismo lenguaje visual
+        que el avatar de `ProfileScreen` en Flutter, en vez de texto plano
+        en una celda.
+      - Tablas: hover en filas (`tbody tr:hover`), padding más generoso,
+        headers en mayúsculas con más letter-spacing, sin borde en la
+        última fila. `.badge-outline` nuevo para roles/estados secundarios
+        (antes todo usaba el mismo `badge-accent`, sin distinguir
+        SUPER_ADMIN de otros roles, o código activo de inactivo).
+      - `.date-badge` (gradiente, mes+día) en "Mis eventos" — mismo
+        lenguaje que el badge de fecha de `_EventCard` en la app Flutter.
+      - `.card-link` para que una card que también es un link (fila de
+        evento) tenga feedback de hover — antes se veía estática.
+      - `Stat` (Ventas y aforo) pasó de texto plano apilado a una
+        tarjetita con borde y el valor en morado brillante.
+      Verificado con `tsc --noEmit` y `npm run build` (ambos limpios).
+    - ✅ **Sidebar en vez de topbar** (feedback del usuario: "No tengo
+      side bar, la barra que existe esta muy fea") — `Topbar.tsx`
+      (barra horizontal arriba) reemplazado por `Sidebar.tsx` (nuevo,
+      fijo a la izquierda, 248px, `position: sticky`): marca con
+      gradiente, links de navegación con ícono SVG inline (sin librería
+      de íconos nueva) y estado activo resaltado (`NavLink` de
+      react-router), y el email/avatar + "Salir" abajo del todo,
+      separados por un borde. `App.tsx` pasó de un layout de una sola
+      columna a `.app-shell` (flex: sidebar + `<main className="app-main">`)
+      — solo se monta cuando hay sesión, igual que antes con el topbar.
+      Verificado con `tsc --noEmit` y `npm run build`.
+    - ✅ **Paginación en todas las tablas** (feedback del usuario: "Las
+      tablas no tienen paginación") — `usePagination`/`Pagination`
+      nuevos en `src/components/Pagination.tsx`, 100% client-side (las
+      listas ya llegan completas en un solo `GET`, no hay endpoint
+      paginado del lado del servidor todavía). Aplicado a las 5 tablas
+      del panel: Organizadores, Todos los usuarios, Establecimientos
+      (`AdminPage.tsx`), Staff y Códigos de descuento (`EventDetailPage.tsx`).
+      10 filas por página por defecto; si la lista se achica y la página
+      actual queda fuera de rango, cae sola a la última página válida.
+      Verificado con `tsc --noEmit` y `npm run build`.
+    - ✅ **Cinco mejoras sugeridas por Claude, todas aceptadas por el
+      usuario** ("todos"):
+      1. **Buscador en "Todos los usuarios"** — filtro client-side por
+         nombre o email (`UsersSection`), sobre la lista ya cargada;
+         la paginación se recalcula sola sobre el resultado filtrado.
+      2. **Loading skeletons** — `Skeleton`/`TableSkeleton` nuevos en
+         `src/components/Skeleton.tsx` (mismo criterio que
+         `skeleton.dart` en Flutter: silueta pulsando via
+         `@keyframes skeleton-pulse`, no un spinner genérico).
+         Reemplaza todos los "Cargando…" de texto plano: las 3 tablas de
+         `AdminPage.tsx`, las 3 secciones de `EventDetailPage.tsx` (+ un
+         skeleton de página entera mientras carga el evento), y la lista
+         de eventos en `MyEventsPage.tsx`.
+      3. **Toasts de confirmación** — `ToastProvider`/`useToast` nuevos
+         (`src/components/Toast.tsx`), sin dependencia externa. Contexto
+         montado una vez en `App.tsx` (sobrevive a la navegación de
+         React Router). Conectado a las 8 mutaciones que antes solo
+         cerraban el formulario en silencio: crear organizador, editar
+         roles, crear/editar establecimiento, actualizar evento,
+         agregar/editar zona, agregar staff, crear código de descuento,
+         activar/desactivar código, crear evento.
+      4. **Confirmación antes de acciones sensibles** —
+         `ConfirmProvider`/`useConfirm` nuevos (`src/components/ConfirmDialog.tsx`,
+         promise-based, `await confirm({...})`), modal propio en vez de
+         `window.confirm` nativo (desentonaría con el resto del panel
+         rediseñado). Aplicado al único caso realmente peligroso
+         identificado: `EditRolesRow` ahora detecta si el usuario
+         autenticado se está sacando a SÍ MISMO el rol SUPER_ADMIN
+         (comparando `currentUser.userId === user.id`) y exige
+         confirmación explícita antes de guardar — sin esto, un click
+         accidental te deja afuera del panel sin forma de revertirlo
+         desde la UI.
+      5. **Bug corregido**: `toggleActive` de códigos de descuento
+         (activar/desactivar) no manejaba errores ni mostraba loading —
+         si la request fallaba, nadie se enteraba. Ahora tiene loading
+         por-fila (`togglingId`), `try/catch` con toast de error, y
+         confirma con un toast de éxito.
+      Verificado con `tsc --noEmit` y `npm run build` (ambos limpios).
+    - **Pendiente, en este orden**: dashboard más rico (gráficos de
+      tendencia, comparación entre eventos, export de datos), reembolsos/
+      cancelaciones (#22), soporte al comprador (ver historial de
+      compras, reenviar boletos), y — sugeridos por Claude, sin decidir
+      todavía — lista de asistentes por evento con export a CSV, y
+      anuncios/notificaciones broadcast a compradores de un evento
+      (reusando `notifications-service`).
+33. ✅ **Nombre e ícono reales de la app** — antes aparecía como "Mobile"
+    con el ícono genérico de Flutter. Nombre final: "Event Hub"
+    (`CFBundleDisplayName`/`CFBundleName` en iOS, `android:label` en
+    Android). Ícono generado programáticamente (un ticket blanco con
+    muescas sobre el morado de marca `#5b4fe9`, coherente con el resto de
+    la app) y aplicado con `flutter_launcher_icons` a todos los tamaños de
+    iOS/Android a partir de una sola imagen 1024×1024. Confirmado en el
+    iPhone (2026-09-23).
+32. ✅ **Inicio de sesión con biometría** (Face ID / Touch ID) — implementado
+    como "candado local" (no un mecanismo de auth nuevo contra el
+    backend): `AuthState.locked` se activa en `bootstrap()` solo si hay
+    sesión guardada Y el dispositivo soporta biometría de verdad
+    (`canCheckBiometrics` + `isDeviceSupported`, fallando a "no bloquear"
+    ante cualquier excepción — mejor dejar pasar que trabar a alguien sin
+    forma de entrar). go_router redirige a `/locked`
+    (`BiometricLockScreen`) antes que cualquier otra regla mientras esté
+    bloqueado. Requirió `MainActivity` en Android como
+    `FlutterFragmentActivity` (no `FlutterActivity` — el prompt nativo es
+    un `DialogFragment`) y `NSFaceIDUsageDescription` en iOS. A propósito
+    NO autentica automáticamente al entrar a la pantalla (se probó y se
+    cuelga en arranque en frío, antes de que el plugin nativo esté listo)
+    — espera un tap explícito en "Desbloquear". Verificado en un iPhone
+    físico en build RELEASE (los builds debug de Flutter no se pueden
+    abrir tocando el ícono, solo desde la herramienta — con eso se
+    confundió un primer intento de prueba).
+
+**Fase de administración de plataforma (decidida con el usuario,
+2026-09-17)** — hasta acá, ORGANIZER y SUPER_ADMIN eran el mismo tipo de
+cuenta en la práctica: no existía ningún flujo para crear un ORGANIZER
+desde la app, así que las cuentas de prueba se creaban a mano en la base
+de datos. El usuario pidió separar de verdad "organizador de un evento"
+de "administrador de toda la plataforma" (él mismo). Se armó una lista
+larga de posibles funciones (moderación de eventos, gestión de roles,
+suspender cuentas, soporte al comprador, métricas globales, auditoría,
+establecimientos como entidad real) y se decidieron dos cosas con el
+usuario antes de construir:
+- El panel de SUPER_ADMIN vive en la MISMA app web (`admin-panel`) que ya
+  usan los organizadores, no un proyecto aparte — reusa login/cliente
+  API/diseño; una sección "Administración" solo visible si el JWT trae el
+  rol SUPER_ADMIN.
+- v1 = núcleo: crear organizadores, ver todos los usuarios, gestionar
+  roles de cualquier usuario, y establecimientos como catálogo real. Todo
+  lo demás (moderación, métricas, auditoría, soporte al comprador) queda
+  para después.
+
+29. ✅ **Crear organizadores desde el panel** — nuevo endpoint
+    `POST /auth/admin/organizers` en auth-service, alcanzable por el
+    gateway bajo un prefijo NUEVO (`/auth/admin`, `authMode: 'required'`,
+    registrado ANTES del `/auth` general porque Express monta
+    middlewares por orden de registro y ambos comparten el mismo
+    prefijo — ver comentario en api-gateway/routes.ts). Rol fijo en
+    ORGANIZER en el backend, nunca aceptado desde el body, para que este
+    endpoint no pueda usarse por error para crear otro SUPER_ADMIN.
+30. ✅ **Ver y editar roles de cualquier usuario** —
+    `GET /auth/admin/users` (sin passwordHash) y
+    `PATCH /auth/admin/users/:id/roles` (reemplaza el arreglo completo,
+    nunca deja a alguien sin ningún rol).
+31. ✅ **Establecimientos como catálogo real** — nuevo modelo `Venue` en
+    events-service (nombre, dirección, capacidad opcional), CRUD sin
+    `delete` (mismo criterio que las zonas: más simple no pensar qué pasa
+    si algo en uso desaparece). Listado también visible para ORGANIZER
+    (a futuro, para elegir uno al crear su evento — todavía NO hay FK
+    entre `Event` y `Venue`, eso queda para cuando se construya el mapa
+    de locaciones, Fase C #18).
+- Bootstrap: la primera cuenta SUPER_ADMIN no puede crearse desde la app
+  (sería un agujero de seguridad) — se promovió la cuenta real del
+  usuario (`jaymar28@hotmail.com`) a mano con SQL, una sola vez.
+- Verificado end-to-end con curl a través del gateway (crear organizador,
+  listar usuarios, crear/listar establecimientos, y confirmar que un
+  ATTENDEE normal recibe 403 en las tres rutas). La UI de React
+  (`AdminPage.tsx`, con secciones Organizadores/Usuarios/Establecimientos)
+  compila sin errores (`tsc` + `vite build`). **Confirmado visualmente
+  por el usuario (2026-09-26)** abriendo `http://localhost:5173/admin`
+  con su cuenta SUPER_ADMIN.
+
+*Fase F — rediseño visual premium (decidida con el usuario, 2026-09-25):*
+hasta acá la app funcionaba de punta a punta pero con el tema claro por
+defecto de Flutter, sin buscador, sin pantalla de perfil, y con el
+listado de eventos sintiéndose "plano". El usuario pidió mantener el
+morado de marca pero sumarle negro para una sensación más premium/
+profesional, y después redisenar lo que se sintiera flojo encima de esa
+base nueva.
+
+34. ✅ **Paleta oscura morado + negro** — nuevo sistema de diseño en
+    `AppColors`/`AppTheme`/`AppGradients` (`lib/core/theme/app_theme.dart`):
+    fondo `#0D0D12`, superficies `#1A1A22`, acento `#7C6FF0` con variante
+    brillante `#9B90F5` para gradientes. `AppTheme.light()` reemplazado por
+    `AppTheme.dark()` (único call site: `main.dart`). Corregido en el
+    camino: el QR de `ticket_screen.dart` usaba el token `ink` (que pasó
+    de oscuro a casi blanco) para los módulos del código — se detectó
+    antes de que llegara al usuario y se fijó a negro sobre blanco
+    siempre, independiente del tema (un QR no puede depender de la
+    paleta). Splash screens de iOS/Android actualizados a negro cálido
+    para no mostrar un flash blanco al abrir. Confirmado en el iPhone.
+35. ✅ **Listado de eventos rediseñado + buscador + perfil** —
+    `event_list_screen.dart`: buscador de texto (filtra cliente-side por
+    título/venue/ciudad sobre la lista ya cargada del servidor, sin viaje
+    de red por letra), tarjetas con badge de fecha en gradiente morado,
+    ícono de categoría y "desde $X" con el precio más bajo entre zonas,
+    y sombra con resplandor morado en vez de sombra gris plana. Hoja de
+    filtros (`_FilterSheet`) rediseñada con chips de categoría con ícono,
+    bordes redondeados grandes y botón "Aplicar" en pill morado — antes
+    usaba widgets Material por defecto ("muy feos", feedback textual del
+    usuario). Nueva `ProfileScreen` (`lib/features/profile/profile_screen.dart`,
+    ruta `/profile`): avatar con inicial del email, chips de rol, accesos
+    a "Mis boletos"/"Escanear boletos" (si aplica) y "Cerrar sesión" — el
+    ícono de logout suelto en el AppBar del listado se reemplazó por un
+    ícono de perfil que lleva ahí. Requirió que `AuthState` exponga
+    `email` (decodificado del JWT, no hay endpoint `/auth/me`). Sin
+    edición de datos de perfil todavía (el backend no tiene endpoint para
+    eso). Verificado con `flutter analyze` (sin issues) y en el iPhone.
+36. ✅ **Rediseño de la pantalla de detalle de evento**
+    (`event_detail_screen.dart`) — header con `SliverAppBar` expandible
+    (240px) con gradiente de marca, ícono grande de la categoría como
+    marca de agua, scrim degradado hacia el fondo para legibilidad del
+    título superpuesto, y chip de categoría. Función `categoryIcon()`
+    (antes privada en `event_list_screen.dart`) se hizo pública y
+    compartida para no duplicar el mapeo categoría→ícono entre listado y
+    detalle. Tarjeta de info (venue+ciudad, fecha/hora, "desde $X")
+    agrupada en un solo contenedor con borde en vez de filas sueltas.
+    Zonas (`_ZoneTile`) con barra vertical en gradiente y botón circular
+    de flecha en vez de solo un chevron — más táctil, coherente con el
+    resto de la Fase F. Sin imagen de portada todavía (depende de #41).
+    Confirmado en el iPhone.
+37. ✅ **Loading states con skeleton** — nuevo `lib/core/widgets/skeleton.dart`
+    (`Skeleton` genérico + `EventCardSkeleton` con la silueta exacta de
+    `_EventCard`): pulso de opacidad entre dos tonos de `AppColors.surface`
+    vía `AnimationController.repeat(reverse: true)`, sin agregar un
+    paquete de shimmer externo (no hace falta el barrido diagonal, solo
+    la silueta pulsando). Listado de eventos muestra 5 `EventCardSkeleton`
+    mientras carga en vez de un `CircularProgressIndicator` centrado;
+    detalle de evento tiene su propio `_EventDetailSkeleton` (header,
+    tarjeta de info, dos filas de zona). Verificado con `flutter analyze`.
+38. ✅ **Carrusel de eventos destacados** — sección "PRÓXIMOS" arriba del
+    listado (`_FeaturedCarousel`/`_FeaturedCard`), los 5 eventos con
+    fecha más próxima (`event.startsAt` ascendente), tarjetas anchas con
+    gradiente de marca e ícono de categoría como marca de agua — sin
+    campo "destacado" nuevo en el backend, es puramente una vista distinta
+    de los mismos datos. `event_list_screen.dart` se reestructuró de
+    `ListView` a `CustomScrollView` con slivers para poder intercalar el
+    carrusel (`SliverToBoxAdapter`) y la sección "TODOS LOS EVENTOS"
+    (`SliverList.separated`) en el mismo scroll. El carrusel se oculta
+    mientras hay búsqueda o filtro activo (mostrar "próximos" no tiene
+    sentido sobre una lista ya filtrada). Deliberadamente sin `Hero` en
+    las tarjetas del carrusel — usan el mismo `id` que las tarjetas del
+    listado principal, y dos `Hero` con el mismo tag en la misma pantalla
+    revienta en tiempo de ejecución; se sacrificó la animación de vuelo
+    solo en esta entrada, no en la del listado principal.
+39. ✅ **Favoritos/guardados** — `FavoritesState` (ChangeNotifier) nuevo,
+    persistido con `shared_preferences` (no `flutter_secure_storage`:
+    no es sensible como el token, y no lo necesita leer el backend). Sin
+    backend a propósito — resuelto como preferencia local del viewer, no
+    como dato de negocio; se puede sincronizar al servidor después si
+    hace falta verlos desde otro dispositivo. `FavoriteButton` (nuevo
+    widget compartido, `favorite_button.dart`) con variante `dark` para
+    fondos con gradiente — usado en `_EventCard`, `_FeaturedCard`
+    (listado) y en el `SliverAppBar.actions` del detalle. Registrado en
+    el árbol de providers en `main.dart` (`ChangeNotifierProvider`) y
+    cargado en paralelo a `AuthState.bootstrap()` al arrancar. Requirió
+    actualizar `test/widget_test.dart` (nuevo parámetro obligatorio
+    `favoritesState`, `SharedPreferences.setMockInitialValues({})`) y
+    ajustar sus asserts porque el único evento de prueba ahora aparece
+    dos veces a propósito (carrusel "Próximos" + lista completa, ver
+    #38) — no era un bug, era el test desactualizado sobre una UI que
+    cambió. Verificado con `flutter analyze` y `flutter test` (verde).
+    Se detectó en la misma sesión que faltaba una forma de VER los
+    favoritos guardados (pregunta directa del usuario: "Y despues donde
+    veo mis favoritos?") — se agregó un ícono de corazón en el AppBar
+    del listado que actúa como filtro (mismo patrón que el buscador y la
+    hoja de filtros: cliente-side sobre la lista ya cargada), oculta el
+    carrusel "Próximos" mientras está activo, y muestra un estado vacío
+    dedicado ("Todavía no marcaste eventos como favoritos") en vez de
+    reusar el mensaje genérico de búsqueda sin resultados.
+    Se detectó en la misma revisión (pregunta directa del usuario: "Los
+    eventos ya pasados deberian aparecer?") que el listado principal
+    mostraba eventos con `startsAt` en el pasado — `GET /events` no
+    filtra por fecha (soporta `fromDate`/`toDate` desde la Fase C #19,
+    pero la UI nunca lo usó). Se filtró del lado del cliente en
+    `event_list_screen.dart` (`e.startsAt.isAfter(DateTime.now())`)
+    antes de aplicar búsqueda/favoritos/carrusel — un evento pasado no
+    se puede comprar, no tiene sentido mostrarlo fuera de "Mis boletos"
+    (que sí es un historial). Verificado con `flutter analyze` y
+    `flutter test`.
+40. ✅ **Revisión de pantallas restantes** — auditoría con `grep` de
+    `Colors.white/black/grey/blue/red` en todo `lib/features` y
+    `lib/core/widgets`: todos los usos encontrados son intencionales
+    (texto/íconos blancos sobre el gradiente de marca, QR negro sobre
+    blanco — ver #34, overlay negro de la cámara en `scan_screen.dart`),
+    ninguno es un remanente del tema claro viejo. Confirmado también que
+    todo archivo de UI importa `app_theme.dart`; los que no lo hacen son
+    exclusivamente modelos/repositorios sin UI. No se encontró nada para
+    corregir.
+41. ✅ **Imágenes de evento** (pedido explícito del usuario, 2026-09-25) —
+    hoy `Event` no tiene ningún campo de imagen, solo texto. Alcance
+    propuesto:
+    - `Event.coverImageUrl` (nullable, portada única — la que se ve en
+      la tarjeta del listado y como header del detalle) +
+      `Event.galleryImageUrls` (array de URLs, opcional, se muestra
+      como carrusel adicional dentro del detalle). Ambos nullable para
+      no requerir backfill de eventos existentes, igual que se hizo con
+      `city`/`category` en la Fase C (#19).
+    - **Decisión pendiente con el usuario**: dónde se alojan los
+      archivos. events-service no tiene hoy ningún mecanismo de subida
+      de binarios — las opciones son (a) un bucket S3-compatible
+      (Cloudflare R2, tiene capa gratis generosa y no depende de AWS) o
+      (b) subir la URL de una imagen ya alojada externamente (más
+      simple, cero infraestructura nueva, pero exige que el organizador
+      tenga dónde subir la imagen primero). Recomendación: empezar con
+      (b) — URL directa — para no bloquear esta feature en configurar
+      almacenamiento de objetos, y migrar a (a) si el organizador
+      promedio no tiene forma fácil de conseguir una URL de imagen.
+    - Admin panel (React): campo(s) para portada/galería al crear o
+      editar un evento.
+    - App Flutter: imagen de portada en `_EventCard` (reemplazando o
+      complementando el badge de fecha) y en el header de
+      `event_detail_screen.dart`; carrusel de galería en el detalle si
+      `galleryImageUrls` no está vacío. Placeholder con el gradiente de
+      marca cuando el evento no tiene `coverImageUrl` (nunca un ícono
+      roto ni un espacio en blanco).
+    - Depende en la práctica de #36 (rediseño del detalle) — tiene
+      sentido construir el layout con imagen desde el inicio del
+      rediseño en vez de encajarla después.
+
+    **Implementado (2026-09-26):** se resolvió la decisión de
+    almacenamiento a favor de (b) URL directa, sin bucket propio —
+    `Event.coverImageUrl` (nullable) y `Event.galleryImageUrls`
+    (`String[]`, default `[]`) en `events-service/prisma/schema.prisma`,
+    migración `event_images` aplicada. `CreateEventDto`/`UpdateEventDto`
+    los validan con `@IsUrl()` (opcionales). Admin panel (React): campos
+    de portada y galería (URLs separadas por coma) tanto en el
+    formulario de creación (`MyEventsPage.tsx`) como en la edición
+    (`EventDetailPage.tsx`), con preview de la portada en la vista de
+    solo lectura. App Flutter: `EventModel.coverImageUrl`/
+    `galleryImageUrls` nuevos; `_EventThumbnail` (nuevo widget en
+    `event_list_screen.dart`) muestra la portada como miniatura con la
+    fecha superpuesta si existe, o el badge de gradiente de siempre si
+    no; `_FeaturedCard` usa la portada como fondo con scrim degradado
+    en vez del gradiente de marca cuando hay imagen; el header del
+    detalle (`event_detail_screen.dart`) hace lo mismo, y una nueva
+    sección "Galería" (`_EventGallery`, carrusel horizontal) aparece si
+    `galleryImageUrls` no está vacío. Todas las imágenes usan
+    `errorBuilder`/`loadingBuilder` para no mostrar el ícono roto de
+    Flutter si una URL falla — cae al placeholder de gradiente.
+    Verificado con `flutter analyze` y `flutter test` (verde), y
+    visualmente con una URL de prueba (Unsplash) cargada a mano en la
+    base de datos de desarrollo.
+
+    **Ajuste post-verificación (feedback del usuario):** la primera
+    versión de `_FeaturedCard` (carrusel) usaba la portada como fondo
+    completo con un scrim negro — el usuario lo señaló como
+    inconsistente ("no pega con el color morado de fondo... a diferencia
+    de como se ve en el listado", y riesgo de que el texto se pierda
+    según el contenido de la foto). Se corrigió para que la tarjeta del
+    carrusel siga el mismo lenguaje que `_EventThumbnail` del listado:
+    el gradiente de marca queda como base SIEMPRE, y la portada se
+    muestra encuadrada arriba (64px, esquinas redondeadas) en vez de
+    fondo completo — el texto (título/venue/precio) queda siempre sobre
+    el gradiente sólido, nunca sobre la foto, así que su legibilidad no
+    depende del contenido de la imagen. Se subió la altura del carrusel
+    de 148 a 190px para que la miniatura entre sin overflow. Confirmado
+    en el iPhone ("Muchisimo mejor!").
+
+    Con esto se cierra la Fase F completa (#34-41).
 
 ## What I noticed about how you think
 

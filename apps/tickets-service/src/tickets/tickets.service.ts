@@ -1,10 +1,12 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { signTicketToken } from '@event-hub/shared-types';
+import { RawInternalHeaders } from '@event-hub/internal-auth';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { DomainEventsPublisher } from '../messaging/domain-events.publisher';
+import { AuthClientService } from './auth-client.service';
 
 export interface OrderPaidPayload {
   orderId: string;
@@ -25,6 +27,7 @@ export class TicketsService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly publisher: DomainEventsPublisher,
+    private readonly authClient: AuthClientService,
     config: ConfigService,
   ) {
     this.qrSecret = config.getOrThrow<string>('TICKET_QR_SECRET');
@@ -120,8 +123,29 @@ export class TicketsService {
     }
   }
 
-  findByUser(userId: string) {
-    return this.prisma.ticket.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
+  /**
+   * "Mis boletos" (app Flutter) necesita más que el Ticket crudo — sin
+   * nombre/precio de zona ni eventId, el cliente no podría mostrar nada
+   * legible ni saber a qué evento pedirle título/lugar/fecha
+   * (GET /events/:id, ya público). tickets-service ya tiene esa copia
+   * local sincronizada (EventZone, ver ZonesConsumer) — no hace falta
+   * llamar a events-service para esto.
+   */
+  async findByUser(userId: string) {
+    const tickets = await this.prisma.ticket.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
+    const zoneIds = [...new Set(tickets.map((t) => t.zoneId))];
+    const zones = await this.prisma.eventZone.findMany({ where: { id: { in: zoneIds } } });
+    const zoneById = new Map(zones.map((z) => [z.id, z]));
+
+    return tickets.map((ticket) => {
+      const zone = zoneById.get(ticket.zoneId);
+      return {
+        ...ticket,
+        eventId: zone?.eventId ?? null,
+        zoneName: zone?.name ?? null,
+        zonePrice: zone?.price ?? null,
+      };
+    });
   }
 
   /** Boletos vendidos por zona — alimenta el dashboard del organizador
@@ -165,6 +189,59 @@ export class TicketsService {
       userId: ticket.userId,
       scannedAt: ticket.scannedAt,
     };
+  }
+
+  /**
+   * Fase E: "asignar boletos de una compra grupal a amigos" — solo el
+   * dueño real (userId) puede etiquetar sus propios boletos, y solo se
+   * guarda un nombre informativo (no cambia userId ni requiere que el
+   * amigo tenga cuenta). Más liviano que una transferencia real.
+   */
+  async assignTo(ticketId: string, requesterId: string, name: string) {
+    const ticket = await this.prisma.ticket.findUnique({ where: { id: ticketId } });
+    if (!ticket) {
+      throw new NotFoundException(`Boleto ${ticketId} no existe`);
+    }
+    if (ticket.userId !== requesterId) {
+      throw new ForbiddenException('No puedes asignar un boleto que no te pertenece');
+    }
+    return this.prisma.ticket.update({
+      where: { id: ticketId },
+      data: { assignedToName: name },
+    });
+  }
+
+  /**
+   * Fase E: transferencia real de boleto entre cuentas — a diferencia de
+   * `assignTo` (etiqueta cosmética), esto SÍ cambia el `userId` dueño.
+   * Sin notificaciones reales todavía (Fase B), el destinatario debe ya
+   * tener cuenta registrada; no hay invitación por email posible aún.
+   * Un boleto ya usado no se puede transferir — transferir la propiedad
+   * de algo que ya cumplió su función no tiene sentido de negocio.
+   */
+  async transferTo(ticketId: string, requesterId: string, toEmail: string, headers: RawInternalHeaders) {
+    const ticket = await this.prisma.ticket.findUnique({ where: { id: ticketId } });
+    if (!ticket) {
+      throw new NotFoundException(`Boleto ${ticketId} no existe`);
+    }
+    if (ticket.userId !== requesterId) {
+      throw new ForbiddenException('No puedes transferir un boleto que no te pertenece');
+    }
+    if (ticket.scannedAt !== null) {
+      throw new BadRequestException('No se puede transferir un boleto ya utilizado');
+    }
+
+    const recipient = await this.authClient.findByEmail(toEmail, headers);
+    if (recipient.id === requesterId) {
+      throw new BadRequestException('No puedes transferirte un boleto a ti mismo');
+    }
+
+    return this.prisma.ticket.update({
+      where: { id: ticketId },
+      // La etiqueta de "asignado a" (Fase E, #26) pierde sentido tras una
+      // transferencia real: el nuevo dueño puede poner la suya si quiere.
+      data: { userId: recipient.id, assignedToName: null },
+    });
   }
 
   /**

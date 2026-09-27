@@ -19,17 +19,27 @@ class ScanResult {
         return ScanResult(
           status: ScanStatus.alreadyUsed,
           message: json['message'] as String?,
-          scannedAt: json['scannedAt'] == null ? null : DateTime.parse(json['scannedAt'] as String),
+          scannedAt: json['scannedAt'] == null
+              ? null
+              : DateTime.parse(json['scannedAt'] as String),
         );
       case 'INVALID':
-        return ScanResult(status: ScanStatus.invalid, message: json['message'] as String?);
+        return ScanResult(
+          status: ScanStatus.invalid,
+          message: json['message'] as String?,
+        );
       case 'DEGRADED':
-        return ScanResult(status: ScanStatus.degraded, message: json['message'] as String?);
+        return ScanResult(
+          status: ScanStatus.degraded,
+          message: json['message'] as String?,
+        );
       default:
         return ScanResult.error('Respuesta inesperada del servidor');
     }
   }
 
-  factory ScanResult.error([String? message]) =>
-      ScanResult(status: ScanStatus.error, message: message ?? 'No se pudo conectar con el servidor');
+  factory ScanResult.error([String? message]) => ScanResult(
+    status: ScanStatus.error,
+    message: message ?? 'No se pudo conectar con el servidor',
+  );
 }

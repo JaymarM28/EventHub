@@ -11,19 +11,101 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// Fase C (#19, búsqueda y filtros): MUSICA/DEPORTES/TEATRO/CONFERENCIA/
+/// FESTIVAL/OTRO — lista fija a propósito, un select en la UI es más simple
+/// de filtrar que texto libre. Si hace falta una categoría nueva más
+/// adelante, se agrega acá.
+enum EventCategory {
+  MUSICA
+  DEPORTES
+  TEATRO
+  CONFERENCIA
+  FESTIVAL
+  OTRO
+}
+
 model Event {
   id          String   @id @default(uuid())
   title       String
   description String?
   venue       String
+  /// Nullable a propósito: eventos creados ANTES de Fase C no tienen
+  /// ciudad/categoría y no vale la pena forzar un backfill inventado —
+  /// simplemente no aparecen si alguien filtra por esto. CreateEventDto
+  /// SÍ los exige para eventos nuevos de acá en adelante.
+  city        String?
+  category    EventCategory?
+  /// Fase D (#20, pagos reales): código ISO 4217 de 3 letras. Default COP
+  /// a propósito ("por ahora COP, pero según la región" — decisión del
+  /// usuario) — vive en el evento, no fijo en código, para que el día que
+  /// haya organizadores en otro país puedan elegir la moneda de SU evento
+  /// sin otra migración. Stripe trata algunas monedas (COP incluida) como
+  /// "cero decimales" — ver StripeClientService en orders-service, ahí se
+  /// decide si el monto se multiplica ×100 o se manda tal cual según esto.
+  currency    String   @default("COP")
   startsAt    DateTime
   organizerId String // userId del token — no hay FK cross-DB entre servicios
+  /// Fase F (#41, imágenes de evento): URL directa nada más, sin subida de
+  /// binarios — el organizador ya aloja la imagen donde sea (no hay bucket
+  /// propio todavía, ver DESIGN.md #41 para la decisión). Ambos nullable
+  /// a propósito: eventos existentes no tienen imagen y no vale la pena
+  /// inventar un backfill, igual criterio que city/category en Fase C.
+  coverImageUrl     String?
+  galleryImageUrls  String[] @default([])
+  /// Fase C (#18, mapa de la locación): geocodificadas automáticamente a
+  /// partir de venue+city al crear/editar el evento (ver GeocodingService),
+  /// nunca pedidas al organizador a mano. Ambas nullable: geocoding es
+  /// best-effort (puede no encontrar la dirección, o Nominatim puede estar
+  /// caído) — un evento sin coordenadas simplemente no muestra el mapa,
+  /// nunca bloquea la creación/edición del evento por esto.
+  latitude          Float?
+  longitude         Float?
+  /// Dirección completa devuelta por el geocoder (Nominatim `display_name`)
+  /// — más precisa que "venue, city" tipeado por el organizador, útil para
+  /// mostrar bajo el mapa. Mismo criterio nullable/best-effort que lat/lng.
+  address           String?
   zones       Zone[]
   staff       EventStaff[]
+  discountCodes DiscountCode[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  @@index([city])
+  @@index([category])
   @@map("events")
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED
+}
+
+/// #23 — creados por el organizador, uno por evento (nunca globales a
+/// propósito, decisión del usuario 2026-09-26: acotar el "blast radius" de
+/// un código filtrado/abusado a un solo evento). `maxUses` nullable =
+/// ilimitado. El canje real (incrementar `usedCount`) lo hace
+/// `redeem()` en una transacción con `SELECT ... FOR UPDATE` — mismo
+/// patrón que la reserva de zonas en tickets-service, para que dos
+/// canjes concurrentes del último uso disponible no sobrepasen `maxUses`.
+model DiscountCode {
+  id        String       @id @default(uuid())
+  eventId   String
+  event     Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  code      String
+  type      DiscountType
+  /// PERCENTAGE: 0-100. FIXED: monto en la moneda del evento.
+  value     Decimal      @db.Decimal(10, 2)
+  maxUses   Int?
+  usedCount Int          @default(0)
+  active    Boolean      @default(true)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  // Único POR EVENTO, no global — el mismo texto de código puede existir
+  // en dos eventos distintos sin chocar.
+  @@unique([eventId, code])
+  @@index([eventId])
+  @@map("discount_codes")
 }
 
 model Zone {
@@ -57,4 +139,21 @@ model EventStaff {
   @@unique([eventId, userId])
   @@index([eventId])
   @@map("event_staff")
+}
+
+/// Catálogo de plataforma (Fase de administración, decidida 2026-09-17):
+/// administrado por SUPER_ADMIN, NO todavía ligado a Event por FK — un
+/// organizador sigue tipeando `Event.venue` como texto libre por ahora.
+/// La integración real (elegir un Venue al crear un evento, con
+/// coordenadas para el mapa de Fase C #18) queda para cuando se construya
+/// esa fase; v1 de este catálogo solo necesita existir y ser administrable.
+model Venue {
+  id        String   @id @default(uuid())
+  name      String
+  address   String
+  capacity  Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("venues")
 }

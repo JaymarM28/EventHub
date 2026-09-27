@@ -1,18 +1,22 @@
-/* Misma paleta que la app Flutter (ver apps/mobile/lib/core/theme/app_theme.dart)
-   — un solo producto, una sola identidad, aunque el stack sea distinto. */
+/* Misma paleta que la app Flutter (ver apps/mobile/lib/core/theme/app_theme.dart,
+   AppColors) — un solo producto, una sola identidad, aunque el stack sea
+   distinto. Negro cálido + morado vivo (decisión del usuario, 2026-09-25),
+   llevado al panel el 2026-09-26 para que ambas superficies compartan
+   identidad de marca en vez de que el panel se sienta "de otra app". */
 :root {
-  --ink: #16161d;
-  --ink-soft: #6b6b76;
-  --background: #faf9f6;
-  --surface: #ffffff;
-  --border: #e7e4dd;
-  --accent: #5b4fe9;
-  --accent-soft: #eeebfc;
-  --error: #dc3d43;
-  --success: #1e9e5a;
-  --warning: #b5760a;
+  --ink: #f5f4f2;
+  --ink-soft: #9a98a8;
+  --background: #0d0d12;
+  --surface: #1a1a22;
+  --border: #2a2a35;
+  --accent: #7c6ff0;
+  --accent-bright: #9b90f5;
+  --accent-soft: #232030;
+  --error: #ff6b6b;
+  --success: #3dd68c;
+  --warning: #e8a94a;
 
-  color-scheme: light;
+  color-scheme: dark;
   color: var(--ink);
   background: var(--background);
   font: 15px/1.5 -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -55,16 +59,50 @@ a {
 }
 
 .page {
-  max-width: 880px;
+  max-width: 960px;
   margin: 0 auto;
   padding: 32px 20px 64px;
+}
+
+/* Bloques de página (Organizadores / Usuarios / Establecimientos, etc.) —
+   más aire entre secciones que el `.stack` de 12px que usan los
+   formularios internos, para que la jerarquía "página > secciones >
+   campos" se note a simple vista. */
+.stack-lg {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.page-header {
+  margin-bottom: 28px;
+}
+
+.page-header .eyebrow {
+  color: var(--accent-bright);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin: 0 0 6px;
+}
+
+.section-header {
+  margin-bottom: 4px;
+}
+
+.section-header .subtitle {
+  color: var(--ink-soft);
+  font-size: 13px;
+  margin-top: 2px;
 }
 
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: 18px;
   padding: 20px;
+  box-shadow: 0 10px 30px rgba(124, 111, 240, 0.06);
 }
 
 .stack {
@@ -103,44 +141,58 @@ label {
 }
 
 input,
-textarea {
+textarea,
+select {
   width: 100%;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
   font: inherit;
   color: var(--ink);
-  background: var(--surface);
+  background: var(--background);
 }
 
 input:focus,
-textarea:focus {
+textarea:focus,
+select:focus {
   outline: none;
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(124, 111, 240, 0.18);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--ink-soft);
 }
 
 button {
   font: inherit;
   cursor: pointer;
   border: none;
-  border-radius: 10px;
-  padding: 10px 16px;
+  border-radius: 999px;
+  padding: 10px 18px;
   font-weight: 600;
+  transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
 button:disabled {
   cursor: not-allowed;
-  opacity: 0.6;
+  opacity: 0.5;
+}
+
+button:not(:disabled):active {
+  transform: scale(0.97);
 }
 
 .btn-primary {
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent), var(--accent-bright));
   color: white;
+  box-shadow: 0 6px 20px rgba(124, 111, 240, 0.35);
 }
 
 .btn-secondary {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-bright);
 }
 
 .btn-ghost {
@@ -149,7 +201,7 @@ button:disabled {
 }
 
 .btn-danger {
-  background: transparent;
+  background: rgba(255, 107, 107, 0.12);
   color: var(--error);
 }
 
@@ -161,7 +213,7 @@ table {
 th,
 td {
   text-align: left;
-  padding: 10px 8px;
+  padding: 12px 10px;
   border-bottom: 1px solid var(--border);
   font-size: 14px;
 }
@@ -169,14 +221,27 @@ td {
 th {
   color: var(--ink-soft);
   font-weight: 600;
-  font-size: 12px;
+  font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.6px;
+  padding-bottom: 10px;
+}
+
+tbody tr {
+  transition: background 0.12s ease;
+}
+
+tbody tr:hover {
+  background: var(--accent-soft);
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
 }
 
 .badge {
   display: inline-block;
-  padding: 2px 10px;
+  padding: 3px 10px;
   border-radius: 20px;
   font-size: 12px;
   font-weight: 600;
@@ -184,22 +249,244 @@ th {
 
 .badge-accent {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-bright);
 }
 
-nav.topbar {
+.badge-outline {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--ink-soft);
+}
+
+/* Avatar circular con inicial — mismo lenguaje visual que el círculo de
+   perfil en la app Flutter (ver ProfileScreen), para que una fila de
+   persona en una tabla no sea solo texto plano. */
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--accent-bright));
+  color: white;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.empty-state {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--ink-soft);
+  font-size: 14px;
+}
+
+/* Card que además es un link (ej. fila de "Mis eventos") — mismo `.card`
+   pero con un feedback de hover claro, algo que un <a> con solo `.card`
+   no tenía (quedaba estático, sin sensación de ser clickeable). */
+.card-link {
+  display: flex;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.card-link:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+/* Badge de fecha en gradiente — mismo lenguaje que el date badge de
+   _EventCard en la app Flutter (event_list_screen.dart), para que un
+   evento se vea igual de identificable acá que en mobile. */
+.date-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 56px;
+  min-width: 52px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-bright));
+  color: white;
+}
+
+.date-badge .month {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.date-badge .day {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+.app-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar {
+  width: 248px;
+  min-width: 248px;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 24px 16px;
+}
+
+.sidebar-brand {
+  font-weight: 800;
+  letter-spacing: -0.4px;
+  font-size: 19px;
+  padding: 0 10px;
+  margin-bottom: 28px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-bright));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar-link {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
-  background: var(--background);
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  color: var(--ink-soft);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 14px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  justify-content: flex-start;
 }
 
-nav.topbar .brand {
-  font-weight: 700;
-  letter-spacing: -0.3px;
-  font-size: 17px;
+.sidebar-link:hover {
+  background: var(--accent-soft);
   color: var(--ink);
-  text-decoration: none;
+}
+
+.sidebar-link.active {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+/* Skeleton de carga — mismo criterio que Skeleton en la app Flutter
+   (lib/core/widgets/skeleton.dart): silueta pulsando en vez de un
+   spinner genérico o un simple "Cargando…". */
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+.skeleton {
+  background: var(--border);
+  border-radius: 8px;
+  animation: skeleton-pulse 1.1s ease-in-out infinite;
+}
+
+/* Toasts — feedback breve tras crear/editar algo (antes el único
+   feedback era que la lista se actualizaba sola). */
+.toast-stack {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 1000;
+}
+
+.toast {
+  min-width: 240px;
+  max-width: 360px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  font-size: 14px;
+  font-weight: 600;
+  animation: toast-in 0.15s ease;
+}
+
+.toast.success {
+  border-left: 3px solid var(--success);
+}
+
+.toast.error {
+  border-left: 3px solid var(--error);
+  color: var(--error);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Confirmación modal — reemplaza al `window.confirm` nativo para las
+   acciones sensibles (ej. sacarte a vos mismo el rol SUPER_ADMIN), que
+   desentonaría con el resto del panel ya rediseñado. */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+}
+
+.modal-dialog {
+  width: 360px;
+  max-width: calc(100vw - 40px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.search-bar {
+  max-width: 320px;
+  margin-bottom: 16px;
 }

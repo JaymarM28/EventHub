@@ -2,8 +2,10 @@
     <!-- Escaneo de QR en el control de acceso (paso 9c, mobile_scanner). -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- Face ID/huella como candado local sobre la sesión (DESIGN.md #32). -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <application
-        android:label="mobile"
+        android:label="Event Hub"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
@@ -43,6 +45,13 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- "Abrir en Maps" desde el detalle del evento (DESIGN.md #18) —
+             sin esto, canLaunchUrl('geo:...') siempre da false en
+             Android 11+ por package visibility. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="geo"/>
         </intent>
     </queries>
 </manifest>

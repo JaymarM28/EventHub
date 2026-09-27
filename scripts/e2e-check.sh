@@ -79,6 +79,28 @@ psql_q() {
   PGPASSWORD="$PG_PASS" psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$db" -tAc "$1"
 }
 
+## Simula lo que OrdersService.markPaid() haría al recibir un webhook real
+## de Mercado Pago confirmando el pago — el webhook real NO puede probarse
+## acá porque Mercado Pago no puede alcanzar esta máquina sin un túnel
+## público (a diferencia de Stripe CLI, Mercado Pago no ofrece un forward
+## local). Esto SÍ ejercita de verdad todo lo que pasa DESPUÉS del pago
+## (emisión de boletos, notificaciones, control de acceso) usando el mismo
+## outbox transaccional que usaría el webhook real.
+simulate_payment_confirmed() {
+  local order_id="$1"
+  psql_q orders_db "
+    WITH o AS (
+      UPDATE orders SET status='PAID' WHERE id='$order_id'
+      RETURNING id, \"userId\", \"zoneId\", \"reservationId\", quantity
+    )
+    INSERT INTO outbox_events (id, type, payload, \"createdAt\", attempts)
+    SELECT gen_random_uuid()::text, 'order.paid',
+      jsonb_build_object('orderId', o.id, 'userId', o.\"userId\", 'zoneId', o.\"zoneId\", 'reservationId', o.\"reservationId\", 'quantity', o.quantity),
+      now(), 0
+    FROM o;
+  " >/dev/null
+}
+
 wait_for_port() {
   local port="$1" name="$2" tries=30
   while [ "$tries" -gt 0 ]; do
@@ -152,7 +174,7 @@ ORG_TOKEN=$(curl -s -X POST "$GATEWAY_URL/auth/login" -H "Content-Type: applicat
 
 log "Creando evento (zona de capacidad 1 para forzar el límite, y otra de capacidad 5 para Fase A)..."
 CREATE=$(curl -s -X POST "$GATEWAY_URL/events" -H "Content-Type: application/json" -H "Authorization: Bearer $ORG_TOKEN" \
-  -d '{"title":"E2E Check","venue":"CI","startsAt":"2027-06-01T20:00:00.000Z","zones":[{"name":"Unica","price":10,"capacity":1},{"name":"Multi","price":20,"capacity":5}]}')
+  -d '{"title":"E2E Check","venue":"CI","city":"CI City","category":"OTRO","startsAt":"2027-06-01T20:00:00.000Z","zones":[{"name":"Unica","price":10,"capacity":1},{"name":"Multi","price":20,"capacity":5}]}')
 ZONE_ID=$(echo "$CREATE" | python3 -c "import sys,json; print(json.load(sys.stdin)['zones'][0]['id'])" 2>/dev/null)
 MULTI_ZONE_ID=$(echo "$CREATE" | python3 -c "import sys,json; print(json.load(sys.stdin)['zones'][1]['id'])" 2>/dev/null)
 EVENT_ID=$(echo "$CREATE" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null)
@@ -164,14 +186,37 @@ log "GET /events público (sin token)..."
 PUBLIC_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$GATEWAY_URL/events")
 [ "$PUBLIC_CODE" = "200" ] && ok "listado público de eventos (200)" || bad "listado público dio $PUBLIC_CODE"
 
+log "Fase C: filtros de búsqueda (ciudad, categoría, precio)..."
+FILTER_HIT=$(curl -s "$GATEWAY_URL/events?city=CI%20City&category=OTRO&maxPrice=10" | python3 -c "import sys,json; print(any(e['id']=='$EVENT_ID' for e in json.load(sys.stdin)))")
+[ "$FILTER_HIT" = "True" ] && ok "filtro que SÍ coincide encuentra el evento" || bad "filtro que debía coincidir no encontró el evento"
+FILTER_MISS=$(curl -s "$GATEWAY_URL/events?city=Ciudad%20Inexistente" | python3 -c "import sys,json; print(any(e['id']=='$EVENT_ID' for e in json.load(sys.stdin)))")
+[ "$FILTER_MISS" = "False" ] && ok "filtro que NO coincide excluye el evento" || bad "filtro que debía excluir sí encontró el evento"
+
 BUYER_TOKEN=$(curl -s -X POST "$GATEWAY_URL/auth/login" -H "Content-Type: application/json" \
   -d "{\"email\":\"$BUYER_EMAIL\",\"password\":\"password123\"}" | python3 -c "import sys,json; print(json.load(sys.stdin)['accessToken'])")
 
-log "Checkout (compra 1 de 1 disponibles)..."
+# Fase D (#20): checkout ya NO paga sincrónicamente — reserva y crea una
+# preferencia de Mercado Pago (Checkout Pro), devolviendo PENDING +
+# checkoutUrl. Completar el pago de verdad requiere el navegador/WebView
+# real (tarjeta de prueba) y que Mercado Pago pueda llegar a nuestro
+# webhook, algo que este script no puede simular sin un túnel público —
+# eso se prueba a mano en la app. Lo que SÍ se verifica acá es que el
+# nuevo contrato (PENDING + checkoutUrl) funciona de punta a punta contra
+# Mercado Pago real.
+log "Checkout (Fase D: ahora crea una preferencia de Mercado Pago, no paga sincrónicamente)..."
 ORDER=$(curl -s -w "\n%{http_code}" -X POST "$GATEWAY_URL/orders/checkout" -H "Content-Type: application/json" -H "Authorization: Bearer $BUYER_TOKEN" \
   -d "{\"zoneId\":\"$ZONE_ID\",\"quantity\":1}")
 ORDER_CODE=$(echo "$ORDER" | tail -1)
-[ "$ORDER_CODE" = "201" ] && ok "checkout exitoso" || bad "checkout falló con $ORDER_CODE: $ORDER"
+ORDER_BODY=$(echo "$ORDER" | sed '$d')
+ORDER_ID=$(echo "$ORDER_BODY" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null)
+ORDER_STATUS=$(echo "$ORDER_BODY" | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])" 2>/dev/null)
+CHECKOUT_URL=$(echo "$ORDER_BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('checkoutUrl') or '')" 2>/dev/null)
+if [ "$ORDER_CODE" = "201" ] && [ "$ORDER_STATUS" = "PENDING" ] && [ -n "$CHECKOUT_URL" ]; then
+  ok "checkout crea la orden PENDING con checkoutUrl de Mercado Pago"
+else
+  bad "checkout falló ($ORDER_CODE, status=$ORDER_STATUS): $ORDER_BODY"
+fi
+simulate_payment_confirmed "$ORDER_ID"
 
 log "GARANTÍA DURA: segundo comprador debe ser rechazado (zona agotada)..."
 BUYER2_EMAIL="buyer2-e2e-$EMAIL_SUFFIX@eventhub.dev"
@@ -194,6 +239,7 @@ MULTI_ORDER=$(curl -s -X POST "$GATEWAY_URL/orders/checkout" -H "Content-Type: a
 MULTI_ORDER_ID=$(echo "$MULTI_ORDER" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null)
 MULTI_AMOUNT=$(echo "$MULTI_ORDER" | python3 -c "import sys,json; print(json.load(sys.stdin)['amount'])" 2>/dev/null)
 [ "$MULTI_AMOUNT" = "60" ] && ok "monto de la orden = precio unitario × cantidad (20×3=60)" || bad "monto esperado 60, fue $MULTI_AMOUNT"
+simulate_payment_confirmed "$MULTI_ORDER_ID"
 
 sleep 3 # tiempo para el outbox + consumo de order.paid/ticket.issued (3 boletos)
 

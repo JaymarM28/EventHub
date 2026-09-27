@@ -3,12 +3,20 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   addStaff,
   addZone,
+  createDiscountCode,
   findEvent,
   getDashboard,
+  listDiscountCodes,
   listStaff,
+  setDiscountCodeActive,
   updateEvent,
   updateZone,
+  EVENT_CATEGORY_LABELS,
   type AddStaffInput,
+  type CreateDiscountCodeInput,
+  type DiscountCode,
+  type DiscountType,
+  type EventCategory,
   type EventDashboard,
   type EventItem,
   type StaffMember,
@@ -16,6 +24,9 @@ import {
 } from '../api/events';
 import { extractErrorMessage } from '../api/client';
 import { useDashboardSocket } from '../hooks/useDashboardSocket';
+import { Pagination, usePagination } from '../components/Pagination';
+import { Skeleton, TableSkeleton } from '../components/Skeleton';
+import { useToast } from '../components/Toast';
 
 export function EventDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -23,6 +34,7 @@ export function EventDetailPage() {
   const [event, setEvent] = useState<EventItem | null>(null);
   const [dashboard, setDashboard] = useState<EventDashboard | null>(null);
   const [staff, setStaff] = useState<StaffMember[] | null>(null);
+  const [discountCodes, setDiscountCodes] = useState<DiscountCode[] | null>(null);
   const [notFound, setNotFound] = useState(false);
 
   const eventId = id!;
@@ -31,11 +43,16 @@ export function EventDetailPage() {
     getDashboard(eventId).then(setDashboard).catch(() => {});
   }, [eventId]);
 
+  const reloadDiscountCodes = useCallback(() => {
+    listDiscountCodes(eventId).then(setDiscountCodes).catch(() => {});
+  }, [eventId]);
+
   useEffect(() => {
     findEvent(eventId).then(setEvent).catch(() => setNotFound(true));
     reloadDashboard();
     listStaff(eventId).then(setStaff).catch(() => {});
-  }, [eventId, reloadDashboard]);
+    reloadDiscountCodes();
+  }, [eventId, reloadDashboard, reloadDiscountCodes]);
 
   // Ventas/aforo en vivo (fase stretch de DESIGN.md): api-gateway avisa
   // por WebSocket cuando se emite un boleto nuevo de este evento — acá
@@ -56,8 +73,19 @@ export function EventDetailPage() {
 
   if (!event) {
     return (
-      <div className="page">
-        <p className="muted">Cargando…</p>
+      <div className="page stack-lg">
+        <div className="card">
+          <Skeleton height={22} width={240} />
+          <div style={{ marginTop: 10 }}>
+            <Skeleton height={14} width={160} />
+          </div>
+        </div>
+        <div className="card">
+          <Skeleton height={18} width={140} />
+          <div style={{ marginTop: 16 }}>
+            <TableSkeleton cols={5} />
+          </div>
+        </div>
       </div>
     );
   }
@@ -71,6 +99,7 @@ export function EventDetailPage() {
       <EventHeader event={event} onUpdated={setEvent} />
       <DashboardSection eventId={eventId} dashboard={dashboard} onZonesChanged={reloadDashboard} />
       <StaffSection eventId={eventId} staff={staff} onStaffAdded={(s) => setStaff((prev) => [...(prev ?? []), s])} />
+      <DiscountCodesSection eventId={eventId} codes={discountCodes} onChanged={reloadDiscountCodes} />
     </div>
   );
 }
@@ -79,17 +108,34 @@ function EventHeader({ event, onUpdated }: { event: EventItem; onUpdated: (event
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(event.title);
   const [venue, setVenue] = useState(event.venue);
+  const [city, setCity] = useState(event.city ?? '');
+  const [category, setCategory] = useState<EventCategory>(event.category ?? 'OTRO');
   const [description, setDescription] = useState(event.description ?? '');
+  const [coverImageUrl, setCoverImageUrl] = useState(event.coverImageUrl ?? '');
+  const [galleryImageUrls, setGalleryImageUrls] = useState(event.galleryImageUrls.join(', '));
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const { showToast } = useToast();
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     setLoading(true);
     try {
-      const updated = await updateEvent(event.id, { title, venue, description });
+      const updated = await updateEvent(event.id, {
+        title,
+        venue,
+        city,
+        category,
+        description,
+        coverImageUrl: coverImageUrl || undefined,
+        galleryImageUrls: galleryImageUrls
+          .split(',')
+          .map((url) => url.trim())
+          .filter(Boolean),
+      });
       onUpdated(updated);
+      showToast('Evento actualizado');
       setEditing(false);
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -101,10 +147,20 @@ function EventHeader({ event, onUpdated }: { event: EventItem; onUpdated: (event
   if (!editing) {
     return (
       <div className="card row-between">
+        {event.coverImageUrl && (
+          <img
+            src={event.coverImageUrl}
+            alt=""
+            style={{ width: 96, height: 96, objectFit: 'cover', borderRadius: 12, marginRight: 16 }}
+          />
+        )}
         <div>
           <h1>{event.title}</h1>
           <p className="muted">
-            {event.venue} · {new Date(event.startsAt).toLocaleString('es', { dateStyle: 'full', timeStyle: 'short' })}
+            {event.venue}
+            {event.city ? `, ${event.city}` : ''} ·{' '}
+            {new Date(event.startsAt).toLocaleString('es', { dateStyle: 'full', timeStyle: 'short' })}
+            {event.category ? ` · ${EVENT_CATEGORY_LABELS[event.category]}` : ''}
           </p>
           {event.description && <p style={{ marginTop: 8 }}>{event.description}</p>}
         </div>
@@ -121,13 +177,54 @@ function EventHeader({ event, onUpdated }: { event: EventItem; onUpdated: (event
         <label htmlFor="edit-title">Título</label>
         <input id="edit-title" value={title} onChange={(e) => setTitle(e.target.value)} required />
       </div>
+      <div className="row">
+        <div style={{ flex: 1 }}>
+          <label htmlFor="edit-venue">Lugar</label>
+          <input id="edit-venue" value={venue} onChange={(e) => setVenue(e.target.value)} required />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label htmlFor="edit-city">Ciudad</label>
+          <input id="edit-city" value={city} onChange={(e) => setCity(e.target.value)} required />
+        </div>
+      </div>
       <div>
-        <label htmlFor="edit-venue">Lugar</label>
-        <input id="edit-venue" value={venue} onChange={(e) => setVenue(e.target.value)} required />
+        <label htmlFor="edit-category">Categoría</label>
+        <select
+          id="edit-category"
+          value={category}
+          onChange={(e) => setCategory(e.target.value as EventCategory)}
+        >
+          {Object.entries(EVENT_CATEGORY_LABELS).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
       </div>
       <div>
         <label htmlFor="edit-description">Descripción</label>
         <textarea id="edit-description" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
+      </div>
+      <div className="row">
+        <div style={{ flex: 1 }}>
+          <label htmlFor="edit-coverImageUrl">URL de portada</label>
+          <input
+            id="edit-coverImageUrl"
+            type="url"
+            placeholder="https://..."
+            value={coverImageUrl}
+            onChange={(e) => setCoverImageUrl(e.target.value)}
+          />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label htmlFor="edit-galleryImageUrls">Galería (URLs separadas por coma)</label>
+          <input
+            id="edit-galleryImageUrls"
+            placeholder="https://..., https://..."
+            value={galleryImageUrls}
+            onChange={(e) => setGalleryImageUrls(e.target.value)}
+          />
+        </div>
       </div>
       {error && <p className="error-text">{error}</p>}
       <div className="row">
@@ -156,14 +253,14 @@ function DashboardSection({
 
   return (
     <div className="card">
-      <h2>Ventas y aforo</h2>
-      <p className="muted" style={{ marginBottom: 16 }}>
-        Se actualiza solo cuando se vende un boleto — sin recargar la página.
-      </p>
-      {!dashboard && <p className="muted">Cargando…</p>}
+      <div className="section-header">
+        <h2>Ventas y aforo</h2>
+        <p className="subtitle">Se actualiza solo cuando se vende un boleto — sin recargar la página.</p>
+      </div>
+      {!dashboard && <div style={{ marginTop: 16 }}><TableSkeleton cols={6} /></div>}
       {dashboard && (
         <>
-          <div className="row" style={{ marginBottom: 16, gap: 24 }}>
+          <div className="row" style={{ marginTop: 16, marginBottom: 20, gap: 12 }}>
             <Stat label="Vendidos" value={`${dashboard.totalSold} / ${dashboard.totalCapacity}`} />
             <Stat label="Ingresos" value={formatMoney(dashboard.totalRevenue)} />
           </div>
@@ -193,7 +290,19 @@ function DashboardSection({
                   />
                 ) : (
                   <tr key={zone.zoneId}>
-                    <td>{zone.name}</td>
+                    <td>
+                      <div className="row" style={{ gap: 8 }}>
+                        <span
+                          style={{
+                            width: 4,
+                            height: 18,
+                            borderRadius: 4,
+                            background: 'linear-gradient(135deg, var(--accent), var(--accent-bright))',
+                          }}
+                        />
+                        {zone.name}
+                      </div>
+                    </td>
                     <td>{formatMoney(Number(zone.price))}</td>
                     <td>{zone.sold}</td>
                     <td>{zone.capacity}</td>
@@ -245,12 +354,14 @@ function EditZoneRow({
   const [capacity, setCapacity] = useState(zone.capacity);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const { showToast } = useToast();
 
   const onSave = async () => {
     setError(null);
     setLoading(true);
     try {
       await updateZone(eventId, zone.zoneId, { name, price, capacity });
+      showToast(`Zona ${name} actualizada`);
       onDone();
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -298,6 +409,7 @@ function AddZoneForm({ eventId, onDone, onCancel }: { eventId: string; onDone: (
   const [zone, setZone] = useState<ZoneDraft>({ name: '', price: 0, capacity: 0 });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const { showToast } = useToast();
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -305,6 +417,7 @@ function AddZoneForm({ eventId, onDone, onCancel }: { eventId: string; onDone: (
     setLoading(true);
     try {
       await addZone(eventId, zone);
+      showToast(`Zona ${zone.name} agregada`);
       onDone();
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -354,11 +467,20 @@ function AddZoneForm({ eventId, onDone, onCancel }: { eventId: string; onDone: (
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <div className="muted" style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+    <div
+      style={{
+        flex: 1,
+        minWidth: 140,
+        padding: '14px 16px',
+        borderRadius: 14,
+        background: 'var(--background)',
+        border: '1px solid var(--border)',
+      }}
+    >
+      <div className="muted" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6 }}>
         {label}
       </div>
-      <div style={{ fontSize: 22, fontWeight: 700 }}>{value}</div>
+      <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--accent-bright)', marginTop: 2 }}>{value}</div>
     </div>
   );
 }
@@ -373,11 +495,15 @@ function StaffSection({
   onStaffAdded: (staff: StaffMember) => void;
 }) {
   const [showForm, setShowForm] = useState(false);
+  const { page, setPage, totalPages, pageItems } = usePagination(staff ?? []);
 
   return (
     <div className="card">
-      <div className="row-between" style={{ marginBottom: 16 }}>
-        <h2>Staff (control de acceso)</h2>
+      <div className="row-between section-header" style={{ marginBottom: 16 }}>
+        <div>
+          <h2>Staff (control de acceso)</h2>
+          <p className="subtitle">Quién más puede escanear boletos en la puerta de este evento.</p>
+        </div>
         <button className="btn-secondary" onClick={() => setShowForm((v) => !v)}>
           {showForm ? 'Cancelar' : '+ Agregar staff'}
         </button>
@@ -393,11 +519,12 @@ function StaffSection({
         />
       )}
 
-      {staff === null && <p className="muted">Cargando…</p>}
+      {staff === null && <TableSkeleton cols={2} />}
       {staff?.length === 0 && !showForm && (
-        <p className="muted">Todavía no agregaste a nadie — solo vos podés escanear boletos de este evento.</p>
+        <p className="empty-state">Todavía no agregaste a nadie — solo vos podés escanear boletos de este evento.</p>
       )}
       {staff && staff.length > 0 && (
+        <>
         <table style={{ marginTop: showForm ? 16 : 0 }}>
           <thead>
             <tr>
@@ -406,14 +533,21 @@ function StaffSection({
             </tr>
           </thead>
           <tbody>
-            {staff.map((s) => (
+            {pageItems.map((s) => (
               <tr key={s.id}>
-                <td>{s.email}</td>
+                <td>
+                  <div className="row" style={{ gap: 10 }}>
+                    <span className="avatar">{s.email.charAt(0).toUpperCase()}</span>
+                    {s.email}
+                  </div>
+                </td>
                 <td>{new Date(s.createdAt).toLocaleDateString('es')}</td>
               </tr>
             ))}
           </tbody>
         </table>
+        <Pagination page={page} totalPages={totalPages} onChange={setPage} />
+        </>
       )}
     </div>
   );
@@ -429,6 +563,7 @@ function AddStaffForm({ eventId, onAdded }: { eventId: string; onAdded: (staff: 
   });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const { showToast } = useToast();
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -436,6 +571,7 @@ function AddStaffForm({ eventId, onAdded }: { eventId: string; onAdded: (staff: 
     setLoading(true);
     try {
       const created = await addStaff(eventId, form);
+      showToast(`${form.email} agregado como staff`);
       onAdded(created);
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -486,6 +622,174 @@ function AddStaffForm({ eventId, onAdded }: { eventId: string; onAdded: (staff: 
       <button className="btn-primary" type="submit" disabled={loading} style={{ alignSelf: 'flex-start' }}>
         {loading ? 'Creando…' : 'Crear cuenta de staff'}
       </button>
+    </form>
+  );
+}
+
+function DiscountCodesSection({
+  eventId,
+  codes,
+  onChanged,
+}: {
+  eventId: string;
+  codes: DiscountCode[] | null;
+  onChanged: () => void;
+}) {
+  const [showForm, setShowForm] = useState(false);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const { page, setPage, totalPages, pageItems } = usePagination(codes ?? []);
+  const { showToast } = useToast();
+
+  // Antes esto no manejaba el error de la request ni mostraba loading —
+  // si fallaba, no se enteraba nadie (ni un mensaje, ni el botón se
+  // trababa esperando).
+  const toggleActive = async (code: DiscountCode) => {
+    setTogglingId(code.id);
+    try {
+      await setDiscountCodeActive(eventId, code.id, !code.active);
+      showToast(`${code.code} ${code.active ? 'desactivado' : 'activado'}`);
+      onChanged();
+    } catch (err) {
+      showToast(extractErrorMessage(err), 'error');
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
+  return (
+    <div className="card">
+      <div className="row-between section-header" style={{ marginBottom: 16 }}>
+        <div>
+          <h2>Códigos de descuento</h2>
+          <p className="subtitle">Porcentaje o monto fijo, con límite de usos opcional.</p>
+        </div>
+        <button className="btn-secondary" onClick={() => setShowForm((v) => !v)}>
+          {showForm ? 'Cancelar' : '+ Nuevo código'}
+        </button>
+      </div>
+
+      {showForm && (
+        <CreateDiscountCodeForm
+          eventId={eventId}
+          onCreated={() => {
+            setShowForm(false);
+            onChanged();
+          }}
+        />
+      )}
+
+      {codes === null && <TableSkeleton cols={5} />}
+      {codes?.length === 0 && !showForm && (
+        <p className="empty-state">Todavía no creaste ningún código de descuento.</p>
+      )}
+      {codes && codes.length > 0 && (
+        <>
+        <table style={{ marginTop: showForm ? 16 : 0 }}>
+          <thead>
+            <tr>
+              <th>Código</th>
+              <th>Descuento</th>
+              <th>Usos</th>
+              <th>Estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {pageItems.map((code) => (
+              <tr key={code.id}>
+                <td>
+                  <span className="badge badge-accent">{code.code}</span>
+                </td>
+                <td>{code.type === 'PERCENTAGE' ? `${code.value}%` : formatMoney(Number(code.value))}</td>
+                <td>
+                  {code.usedCount}
+                  {code.maxUses !== null ? ` / ${code.maxUses}` : ' (ilimitado)'}
+                </td>
+                <td>
+                  <span className={`badge ${code.active ? 'badge-accent' : 'badge-outline'}`}>
+                    {code.active ? 'Activo' : 'Inactivo'}
+                  </span>
+                </td>
+                <td>
+                  <button className="btn-ghost" disabled={togglingId === code.id} onClick={() => toggleActive(code)}>
+                    {togglingId === code.id ? '...' : code.active ? 'Desactivar' : 'Activar'}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <Pagination page={page} totalPages={totalPages} onChange={setPage} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function CreateDiscountCodeForm({ eventId, onCreated }: { eventId: string; onCreated: () => void }) {
+  const [code, setCode] = useState('');
+  const [type, setType] = useState<DiscountType>('PERCENTAGE');
+  const [value, setValue] = useState(10);
+  const [maxUses, setMaxUses] = useState<string>('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const { showToast } = useToast();
+
+  const onSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      const input: CreateDiscountCodeInput = { code, type, value };
+      if (maxUses.trim() !== '') input.maxUses = Number(maxUses);
+      await createDiscountCode(eventId, input);
+      showToast(`Código ${code.toUpperCase()} creado`);
+      onCreated();
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <form className="row" onSubmit={onSubmit} style={{ marginBottom: 16, alignItems: 'flex-end' }}>
+      <div style={{ flex: 2 }}>
+        <label>Código</label>
+        <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="AMIGOS20" required />
+      </div>
+      <div style={{ flex: 1 }}>
+        <label>Tipo</label>
+        <select value={type} onChange={(e) => setType(e.target.value as DiscountType)}>
+          <option value="PERCENTAGE">Porcentaje</option>
+          <option value="FIXED">Monto fijo</option>
+        </select>
+      </div>
+      <div style={{ flex: 1 }}>
+        <label>{type === 'PERCENTAGE' ? 'Porcentaje (%)' : 'Monto'}</label>
+        <input
+          type="number"
+          min={0}
+          max={type === 'PERCENTAGE' ? 100 : undefined}
+          value={value}
+          onChange={(e) => setValue(Number(e.target.value))}
+          required
+        />
+      </div>
+      <div style={{ flex: 1 }}>
+        <label>Usos máx. (opcional)</label>
+        <input
+          type="number"
+          min={1}
+          value={maxUses}
+          onChange={(e) => setMaxUses(e.target.value)}
+          placeholder="Ilimitado"
+        />
+      </div>
+      <button className="btn-primary" type="submit" disabled={loading}>
+        {loading ? 'Creando…' : 'Crear'}
+      </button>
+      {error && <p className="error-text">{error}</p>}
     </form>
   );
 }

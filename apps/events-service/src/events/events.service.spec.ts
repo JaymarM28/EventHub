@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { DomainEventsPublisher } from '../messaging/domain-events.publisher';
 import { AuthClientService } from './auth-client.service';
 import { TicketsClientService } from './tickets-client.service';
+import { GeocodingService } from './geocoding.service';
 
 const headers = { 'x-internal-context': 'p', 'x-internal-signature': 's' };
 
@@ -25,11 +26,22 @@ describe('EventsService', () => {
     zone: {
       create: jest.Mock;
       update: jest.Mock;
+      findUnique: jest.Mock;
     };
+    discountCode: {
+      create: jest.Mock;
+      findMany: jest.Mock;
+      findFirst: jest.Mock;
+      findUnique: jest.Mock;
+      update: jest.Mock;
+    };
+    $transaction: jest.Mock;
+    $queryRaw: jest.Mock;
   };
   let publisher: { publish: jest.Mock };
   let authClient: { createStaffUser: jest.Mock };
   let ticketsClient: { soldCountByZone: jest.Mock };
+  let geocoding: { geocode: jest.Mock };
 
   const organizer: InternalUserContext = {
     userId: 'organizer-1',
@@ -63,11 +75,22 @@ describe('EventsService', () => {
       zone: {
         create: jest.fn(),
         update: jest.fn(),
+        findUnique: jest.fn(),
       },
+      discountCode: {
+        create: jest.fn(),
+        findMany: jest.fn(),
+        findFirst: jest.fn(),
+        findUnique: jest.fn(),
+        update: jest.fn(),
+      },
+      $transaction: jest.fn((fn) => fn(prisma)),
+      $queryRaw: jest.fn(),
     };
     publisher = { publish: jest.fn().mockResolvedValue(undefined) };
     authClient = { createStaffUser: jest.fn() };
     ticketsClient = { soldCountByZone: jest.fn().mockResolvedValue([]) };
+    geocoding = { geocode: jest.fn().mockResolvedValue(null) };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -76,6 +99,7 @@ describe('EventsService', () => {
         { provide: DomainEventsPublisher, useValue: publisher },
         { provide: AuthClientService, useValue: authClient },
         { provide: TicketsClientService, useValue: ticketsClient },
+        { provide: GeocodingService, useValue: geocoding },
       ],
     }).compile();
 
@@ -91,6 +115,8 @@ describe('EventsService', () => {
         {
           title: 'Concierto',
           venue: 'Estadio',
+          city: 'Bogotá',
+          category: 'MUSICA',
           startsAt: new Date().toISOString(),
           zones: [{ name: 'General', price: 50, capacity: 100 }],
         },
@@ -99,6 +125,43 @@ describe('EventsService', () => {
 
       expect(result).toBe(created);
       expect(publisher.publish).toHaveBeenCalledWith('event.created', created);
+    });
+  });
+
+  describe('findAll', () => {
+    it('sin filtros, lista todo (mismo comportamiento que antes de Fase C)', async () => {
+      prisma.event.findMany.mockResolvedValue([]);
+
+      await service.findAll();
+
+      expect(prisma.event.findMany).toHaveBeenCalledWith({
+        where: {},
+        include: { zones: true },
+        orderBy: { startsAt: 'asc' },
+      });
+    });
+
+    it('combina ciudad (case-insensitive), categoría, rango de fechas y precio máximo', async () => {
+      prisma.event.findMany.mockResolvedValue([]);
+
+      await service.findAll({
+        city: 'Bogotá',
+        category: 'MUSICA',
+        fromDate: '2026-01-01',
+        toDate: '2026-12-31',
+        maxPrice: 50,
+      });
+
+      expect(prisma.event.findMany).toHaveBeenCalledWith({
+        where: {
+          city: { equals: 'Bogotá', mode: 'insensitive' },
+          category: 'MUSICA',
+          startsAt: { gte: new Date('2026-01-01'), lte: new Date('2026-12-31') },
+          zones: { some: { price: { lte: 50 } } },
+        },
+        include: { zones: true },
+        orderBy: { startsAt: 'asc' },
+      });
     });
   });
 
@@ -349,6 +412,129 @@ describe('EventsService', () => {
         service.updateZone('ev-1', 'zone-1', { price: 10 }, otherOrganizer),
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(prisma.zone.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findZoneWithOrganizer', () => {
+    it('resuelve eventId/organizerId y los datos para el correo de confirmación a partir de una zona (usado por notifications-service)', async () => {
+      prisma.zone.findUnique.mockResolvedValue({
+        id: 'zone-1',
+        name: 'General',
+        price: { toString: () => '50000' },
+        event: {
+          id: 'ev-1',
+          title: 'Concierto',
+          organizerId: 'organizer-1',
+          venue: 'Estadio',
+          city: 'Bogotá',
+          startsAt: new Date('2027-01-01T20:00:00.000Z'),
+          currency: 'COP',
+        },
+      });
+
+      const result = await service.findZoneWithOrganizer('zone-1');
+
+      expect(prisma.zone.findUnique).toHaveBeenCalledWith({
+        where: { id: 'zone-1' },
+        include: {
+          event: {
+            select: { id: true, title: true, organizerId: true, venue: true, city: true, startsAt: true, currency: true },
+          },
+        },
+      });
+      expect(result).toEqual({
+        eventId: 'ev-1',
+        eventTitle: 'Concierto',
+        organizerId: 'organizer-1',
+        venue: 'Estadio',
+        city: 'Bogotá',
+        startsAt: new Date('2027-01-01T20:00:00.000Z'),
+        currency: 'COP',
+        zoneName: 'General',
+        zonePrice: '50000',
+      });
+    });
+
+    it('lanza NotFoundException si la zona no existe', async () => {
+      prisma.zone.findUnique.mockResolvedValue(null);
+
+      await expect(service.findZoneWithOrganizer('no-existe')).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('createDiscountCode', () => {
+    const event = { id: 'ev-1', organizerId: organizer.userId, zones: [] };
+
+    it('crea el código en mayúsculas', async () => {
+      prisma.event.findUnique.mockResolvedValue(event);
+      prisma.discountCode.findUnique.mockResolvedValue(null);
+      prisma.discountCode.create.mockResolvedValue({ id: 'code-1' });
+
+      await service.createDiscountCode('ev-1', { code: 'amigos20', type: 'PERCENTAGE', value: 20 }, organizer);
+
+      expect(prisma.discountCode.create).toHaveBeenCalledWith({
+        data: { eventId: 'ev-1', code: 'AMIGOS20', type: 'PERCENTAGE', value: 20, maxUses: undefined },
+      });
+    });
+
+    it('rechaza un porcentaje fuera de 0-100', async () => {
+      prisma.event.findUnique.mockResolvedValue(event);
+
+      await expect(
+        service.createDiscountCode('ev-1', { code: 'X', type: 'PERCENTAGE', value: 150 }, organizer),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rechaza un código duplicado en el mismo evento', async () => {
+      prisma.event.findUnique.mockResolvedValue(event);
+      prisma.discountCode.findUnique.mockResolvedValue({ id: 'existing' });
+
+      await expect(
+        service.createDiscountCode('ev-1', { code: 'AMIGOS20', type: 'PERCENTAGE', value: 20 }, organizer),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rechaza a un organizador que no es dueño del evento', async () => {
+      prisma.event.findUnique.mockResolvedValue(event);
+
+      await expect(
+        service.createDiscountCode('ev-1', { code: 'X', type: 'FIXED', value: 10 }, otherOrganizer),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+  });
+
+  describe('redeemDiscountCode', () => {
+    it('GARANTÍA: canjea atómicamente e incrementa usedCount', async () => {
+      prisma.zone.findUnique.mockResolvedValue({ eventId: 'ev-1', price: { toString: () => '50000' } });
+      prisma.$queryRaw.mockResolvedValue([
+        { id: 'code-1', type: 'PERCENTAGE', value: { toString: () => '20' }, maxUses: 5, usedCount: 2, active: true },
+      ]);
+
+      const result = await service.redeemDiscountCode('zone-1', 'amigos20');
+
+      expect(prisma.discountCode.update).toHaveBeenCalledWith({
+        where: { id: 'code-1' },
+        data: { usedCount: { increment: 1 } },
+      });
+      expect(result).toEqual({ type: 'PERCENTAGE', value: '20', zonePrice: '50000' });
+    });
+
+    it('rechaza un código inexistente o inactivo', async () => {
+      prisma.zone.findUnique.mockResolvedValue({ eventId: 'ev-1', price: { toString: () => '50000' } });
+      prisma.$queryRaw.mockResolvedValue([]);
+
+      await expect(service.redeemDiscountCode('zone-1', 'NOEXISTE')).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.discountCode.update).not.toHaveBeenCalled();
+    });
+
+    it('GARANTÍA: rechaza un código que ya alcanzó su límite de usos', async () => {
+      prisma.zone.findUnique.mockResolvedValue({ eventId: 'ev-1', price: { toString: () => '50000' } });
+      prisma.$queryRaw.mockResolvedValue([
+        { id: 'code-1', type: 'FIXED', value: { toString: () => '5000' }, maxUses: 3, usedCount: 3, active: true },
+      ]);
+
+      await expect(service.redeemDiscountCode('zone-1', 'AGOTADO')).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.discountCode.update).not.toHaveBeenCalled();
     });
   });
 });
