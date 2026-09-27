@@ -35,6 +35,8 @@ describe('EventsService', () => {
       findUnique: jest.Mock;
       update: jest.Mock;
     };
+    venue: { findUnique: jest.Mock };
+    venueSection: { findUnique: jest.Mock };
     $transaction: jest.Mock;
     $queryRaw: jest.Mock;
   };
@@ -84,6 +86,8 @@ describe('EventsService', () => {
         findUnique: jest.fn(),
         update: jest.fn(),
       },
+      venue: { findUnique: jest.fn() },
+      venueSection: { findUnique: jest.fn() },
       $transaction: jest.fn((fn) => fn(prisma)),
       $queryRaw: jest.fn(),
     };
@@ -125,6 +129,86 @@ describe('EventsService', () => {
 
       expect(result).toBe(created);
       expect(publisher.publish).toHaveBeenCalledWith('event.created', created);
+    });
+
+    it('acepta venueId si el establecimiento existe', async () => {
+      prisma.venue.findUnique.mockResolvedValue({ id: 'venue-1' });
+      prisma.event.create.mockResolvedValue({ id: 'ev-1', zones: [] });
+
+      await service.create(
+        {
+          title: 'Concierto',
+          venue: 'Estadio',
+          venueId: 'venue-1',
+          city: 'Bogotá',
+          category: 'MUSICA',
+          startsAt: new Date().toISOString(),
+          zones: [{ name: 'General', price: 50, capacity: 100 }],
+        },
+        organizer.userId,
+      );
+
+      expect(prisma.event.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ venueId: 'venue-1' }) }),
+      );
+    });
+
+    it('rechaza un venueId que no existe', async () => {
+      prisma.venue.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.create(
+          {
+            title: 'Concierto',
+            venue: 'Estadio',
+            venueId: 'no-existe',
+            city: 'Bogotá',
+            category: 'MUSICA',
+            startsAt: new Date().toISOString(),
+            zones: [{ name: 'General', price: 50, capacity: 100 }],
+          },
+          organizer.userId,
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.event.create).not.toHaveBeenCalled();
+    });
+
+    it('GARANTÍA: rechaza una zona con venueSectionId si el evento no tiene venueId', async () => {
+      await expect(
+        service.create(
+          {
+            title: 'Concierto',
+            venue: 'Estadio',
+            city: 'Bogotá',
+            category: 'MUSICA',
+            startsAt: new Date().toISOString(),
+            zones: [{ name: 'General', price: 50, capacity: 100, venueSectionId: 'sec-1' }],
+          },
+          organizer.userId,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.event.create).not.toHaveBeenCalled();
+    });
+
+    it('rechaza una sección que pertenece a otro establecimiento', async () => {
+      prisma.venue.findUnique.mockResolvedValue({ id: 'venue-1' });
+      prisma.venueSection.findUnique.mockResolvedValue({ id: 'sec-1', venueId: 'otro-venue' });
+
+      await expect(
+        service.create(
+          {
+            title: 'Concierto',
+            venue: 'Estadio',
+            venueId: 'venue-1',
+            city: 'Bogotá',
+            category: 'MUSICA',
+            startsAt: new Date().toISOString(),
+            zones: [{ name: 'General', price: 50, capacity: 100, venueSectionId: 'sec-1' }],
+          },
+          organizer.userId,
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.event.create).not.toHaveBeenCalled();
     });
   });
 
@@ -378,6 +462,32 @@ describe('EventsService', () => {
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(prisma.zone.create).not.toHaveBeenCalled();
     });
+
+    it('vincula la zona a una sección del venue del evento', async () => {
+      prisma.event.findUnique.mockResolvedValue({
+        id: 'ev-1',
+        organizerId: organizer.userId,
+        venueId: 'venue-1',
+        zones: [],
+      });
+      prisma.venueSection.findUnique.mockResolvedValue({ id: 'sec-1', venueId: 'venue-1' });
+      prisma.zone.create.mockResolvedValue({ id: 'zone-new' });
+
+      await service.addZone('ev-1', { name: 'VIP', price: 100, capacity: 20, venueSectionId: 'sec-1' }, organizer);
+
+      expect(prisma.zone.create).toHaveBeenCalledWith({
+        data: { eventId: 'ev-1', name: 'VIP', price: 100, capacity: 20, venueSectionId: 'sec-1' },
+      });
+    });
+
+    it('rechaza vincular una zona a sección si el evento no tiene venueId', async () => {
+      prisma.event.findUnique.mockResolvedValue({ id: 'ev-1', organizerId: organizer.userId, zones: [] });
+
+      await expect(
+        service.addZone('ev-1', { name: 'VIP', price: 100, capacity: 20, venueSectionId: 'sec-1' }, organizer),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.zone.create).not.toHaveBeenCalled();
+    });
   });
 
   describe('updateZone', () => {
@@ -435,6 +545,16 @@ describe('EventsService', () => {
       await expect(
         service.updateZone('ev-1', 'zone-1', { price: 10 }, otherOrganizer),
       ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.zone.update).not.toHaveBeenCalled();
+    });
+
+    it('rechaza vincular a una sección de otro venue', async () => {
+      prisma.event.findUnique.mockResolvedValue({ ...existingWithZone, venueId: 'venue-1' });
+      prisma.venueSection.findUnique.mockResolvedValue({ id: 'sec-1', venueId: 'otro-venue' });
+
+      await expect(
+        service.updateZone('ev-1', 'zone-1', { venueSectionId: 'sec-1' }, organizer),
+      ).rejects.toBeInstanceOf(NotFoundException);
       expect(prisma.zone.update).not.toHaveBeenCalled();
     });
   });

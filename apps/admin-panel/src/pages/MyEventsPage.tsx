@@ -8,9 +8,11 @@ import {
   type EventItem,
   type ZoneDraft,
 } from '../api/events';
+import { getVenue, listVenues, type Venue } from '../api/venues';
 import { extractErrorMessage } from '../api/client';
 import { Skeleton } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
+import { VenueMapPreview } from '../components/VenueMapPreview';
 
 const emptyZone = (): ZoneDraft => ({ name: '', price: 0, capacity: 0 });
 
@@ -106,6 +108,29 @@ function CreateEventForm({ onCreated }: { onCreated: (event: EventItem) => void 
   const [loading, setLoading] = useState(false);
   const { showToast } = useToast();
 
+  const [venues, setVenues] = useState<Venue[] | null>(null);
+  const [venueId, setVenueId] = useState('');
+  const [selectedVenue, setSelectedVenue] = useState<Venue | null>(null);
+
+  useEffect(() => {
+    listVenues().then(setVenues).catch(() => {});
+  }, []);
+
+  const onSelectVenue = async (id: string) => {
+    setVenueId(id);
+    if (!id) {
+      setSelectedVenue(null);
+      return;
+    }
+    const full = await getVenue(id);
+    setSelectedVenue(full);
+    if (venue.trim() === '') setVenue(full.name);
+    // Un evento nuevo con establecimiento del catálogo no debería empezar
+    // con zonas ya vinculadas a secciones de OTRO establecimiento (podía
+    // pasar si el organizador cambia de idea a mitad de armar el form).
+    setZones((prev) => prev.map((z) => ({ ...z, venueSectionId: undefined })));
+  };
+
   const updateZone = (index: number, patch: Partial<ZoneDraft>) => {
     setZones((prev) => prev.map((z, i) => (i === index ? { ...z, ...patch } : z)));
   };
@@ -119,6 +144,7 @@ function CreateEventForm({ onCreated }: { onCreated: (event: EventItem) => void 
         title,
         description: description || undefined,
         venue,
+        venueId: venueId || undefined,
         city,
         category,
         startsAt: new Date(startsAt).toISOString(),
@@ -159,6 +185,29 @@ function CreateEventForm({ onCreated }: { onCreated: (event: EventItem) => void 
           <input id="city" value={city} onChange={(e) => setCity(e.target.value)} required />
         </div>
       </div>
+      <div>
+        <label htmlFor="venueId">Establecimiento del catálogo (opcional — habilita mapa de secciones)</label>
+        <select id="venueId" value={venueId} onChange={(e) => onSelectVenue(e.target.value)}>
+          <option value="">— Sin establecimiento del catálogo —</option>
+          {(venues ?? []).map((v) => (
+            <option key={v.id} value={v.id}>
+              {v.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      {selectedVenue?.mapImageUrl && (selectedVenue.sections?.length ?? 0) > 0 && (
+        <div>
+          <p className="subtitle" style={{ marginBottom: 8 }}>
+            Elegí abajo, por cada zona, a qué sección del mapa corresponde.
+          </p>
+          <VenueMapPreview
+            mapImageUrl={selectedVenue.mapImageUrl}
+            sections={selectedVenue.sections ?? []}
+            venueName={selectedVenue.name}
+          />
+        </div>
+      )}
       <div className="row">
         <div style={{ flex: 1 }}>
           <label htmlFor="category">Categoría</label>
@@ -230,6 +279,22 @@ function CreateEventForm({ onCreated }: { onCreated: (event: EventItem) => void 
               required
             />
           </div>
+          {(selectedVenue?.sections?.length ?? 0) > 0 && (
+            <div style={{ flex: 1 }}>
+              <label>Sección del mapa</label>
+              <select
+                value={zone.venueSectionId ?? ''}
+                onChange={(e) => updateZone(i, { venueSectionId: e.target.value || undefined })}
+              >
+                <option value="">— Ninguna —</option>
+                {(selectedVenue?.sections ?? []).map((section) => (
+                  <option key={section.id} value={section.id}>
+                    {section.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           {zones.length > 1 && (
             <button
               type="button"

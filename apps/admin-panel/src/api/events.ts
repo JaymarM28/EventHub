@@ -1,10 +1,12 @@
 import { apiClient } from './client';
+import type { VenueSection } from './venues';
 
 export interface Zone {
   id: string;
   name: string;
   price: string;
   capacity: number;
+  venueSectionId: string | null;
 }
 
 /** Debe mantenerse en sync con EventCategory en events-service/prisma/schema.prisma. */
@@ -24,6 +26,9 @@ export interface EventItem {
   title: string;
   description: string | null;
   venue: string;
+  venueId: string | null;
+  /** Solo viene en la vista de detalle (findOne) — findAll/findByOrganizer no lo incluyen. */
+  venueRef?: { id: string; name: string; mapImageUrl: string | null; sections: VenueSection[] } | null;
   city: string | null;
   category: EventCategory | null;
   startsAt: string;
@@ -40,12 +45,14 @@ export interface ZoneDraft {
   name: string;
   price: number;
   capacity: number;
+  venueSectionId?: string;
 }
 
 export interface CreateEventInput {
   title: string;
   description?: string;
   venue: string;
+  venueId?: string;
   city: string;
   category: EventCategory;
   startsAt: string;
@@ -58,6 +65,7 @@ export interface UpdateEventInput {
   title?: string;
   description?: string;
   venue?: string;
+  venueId?: string;
   city?: string;
   category?: EventCategory;
   startsAt?: string;
@@ -171,6 +179,7 @@ export interface UpdateZoneInput {
   name?: string;
   price?: number;
   capacity?: number;
+  venueSectionId?: string;
 }
 
 export async function updateZone(eventId: string, zoneId: string, input: UpdateZoneInput): Promise<EventItem> {

@@ -11,6 +11,13 @@ export class CreateZoneDto {
   @IsInt()
   @Min(1)
   capacity!: number;
+
+  /// Fase G (mapa de establecimiento): vincula esta zona a un polígono del
+  /// mapa del Venue del evento — ver EventsService.assertSectionBelongsToEventVenue
+  /// para la validación real (acá solo se chequea el formato).
+  @IsOptional()
+  @IsString()
+  venueSectionId?: string;
 }
 
 /** Ver EventsService.updateZone — `capacity` nunca puede bajar de lo ya
@@ -29,4 +36,8 @@ export class UpdateZoneDto {
   @IsInt()
   @Min(1)
   capacity?: number;
+
+  @IsOptional()
+  @IsString()
+  venueSectionId?: string;
 }

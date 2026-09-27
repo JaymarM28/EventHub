@@ -24,6 +24,14 @@ export class CreateEventDto {
   @IsString()
   venue!: string;
 
+  /// Fase G (mapa de establecimiento): opcional — vincula el evento a un
+  /// Venue del catálogo para heredar su mapa de secciones. `venue` (texto)
+  /// sigue siendo obligatorio igual que antes; ver el comentario en
+  /// schema.prisma sobre por qué son independientes.
+  @IsOptional()
+  @IsString()
+  venueId?: string;
+
   @IsString()
   city!: string;
 

@@ -15,6 +15,7 @@ import 'event_list_screen.dart' show categoryIcon;
 import 'event_models.dart';
 import 'favorite_button.dart';
 import 'events_repository.dart';
+import 'venue_seat_map.dart';
 
 class EventDetailScreen extends StatefulWidget {
   const EventDetailScreen({super.key, required this.eventId});
@@ -267,6 +268,24 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
                       style: Theme.of(context).textTheme.headlineMedium,
                     ),
                     const SizedBox(height: 12),
+                    if (event.venueMap != null) ...[
+                      Text(
+                        'Tocá una sección del mapa para elegir dónde sentarte',
+                        style: Theme.of(context).textTheme.bodyMedium
+                            ?.copyWith(color: AppColors.inkSoft),
+                      ),
+                      const SizedBox(height: 10),
+                      VenueSeatMap(
+                        venueMap: event.venueMap!,
+                        zones: event.zones,
+                        selectedZoneId: null,
+                        onSectionTap: (zoneId) {
+                          final zone = event.zones.firstWhere((z) => z.id == zoneId);
+                          _onZoneTap(context, event, zone);
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                    ],
                     ...event.zones.map(
                       (zone) => Padding(
                         padding: const EdgeInsets.only(bottom: 10),

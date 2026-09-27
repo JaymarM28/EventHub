@@ -1,15 +1,22 @@
+import 'dart:ui' show Offset;
+
 class ZoneModel {
   ZoneModel({
     required this.id,
     required this.name,
     required this.price,
     required this.capacity,
+    this.venueSectionId,
   });
 
   final String id;
   final String name;
   final double price;
   final int capacity;
+
+  /// Fase G (mapa de establecimiento) — nullable: la mayoría de las zonas
+  /// no están vinculadas a un polígono del mapa todavía.
+  final String? venueSectionId;
 
   factory ZoneModel.fromJson(Map<String, dynamic> json) {
     return ZoneModel(
@@ -18,6 +25,52 @@ class ZoneModel {
       // El backend serializa Decimal de Prisma como string ("50.00").
       price: double.parse(json['price'].toString()),
       capacity: json['capacity'] as int,
+      venueSectionId: json['venueSectionId'] as String?,
+    );
+  }
+}
+
+class VenueSectionModel {
+  VenueSectionModel({required this.id, required this.name, required this.points});
+
+  final String id;
+  final String name;
+
+  /// Puntos del polígono normalizados 0.0–1.0 (ver comentario en
+  /// events-service/prisma/schema.prisma, modelo VenueSection).
+  final List<Offset> points;
+
+  factory VenueSectionModel.fromJson(Map<String, dynamic> json) {
+    return VenueSectionModel(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      points: (json['points'] as List<dynamic>)
+          .map((p) => Offset((p['x'] as num).toDouble(), (p['y'] as num).toDouble()))
+          .toList(),
+    );
+  }
+}
+
+class VenueMapModel {
+  VenueMapModel({required this.name, required this.mapImageUrl, required this.sections});
+
+  final String name;
+  final String mapImageUrl;
+  final List<VenueSectionModel> sections;
+
+  /// Devuelve null si el evento no tiene establecimiento del catálogo
+  /// vinculado, o si ese establecimiento no tiene imagen de mapa cargada
+  /// todavía — en ambos casos no hay nada que dibujar.
+  static VenueMapModel? fromEventJson(Map<String, dynamic> json) {
+    final venueRef = json['venueRef'] as Map<String, dynamic>?;
+    final mapImageUrl = venueRef?['mapImageUrl'] as String?;
+    if (venueRef == null || mapImageUrl == null) return null;
+    return VenueMapModel(
+      name: venueRef['name'] as String,
+      mapImageUrl: mapImageUrl,
+      sections: (venueRef['sections'] as List<dynamic>)
+          .map((s) => VenueSectionModel.fromJson(s as Map<String, dynamic>))
+          .toList(),
     );
   }
 }
@@ -61,12 +114,19 @@ class EventModel {
     this.latitude,
     this.longitude,
     this.address,
+    this.venueMap,
   });
 
   final String id;
   final String title;
   final String? description;
   final String venue;
+
+  /// Solo viene poblado cuando el evento tiene un establecimiento del
+  /// catálogo CON imagen de mapa cargada — ver VenueMapModel.fromEventJson.
+  /// Nunca viene en el listado de eventos (solo en el detalle, findOne),
+  /// mismo criterio de "no sobre-pedir en listas" que el admin panel.
+  final VenueMapModel? venueMap;
 
   /// Nullable — eventos creados antes de Fase C (#19) no tienen esto.
   final String? city;
@@ -111,6 +171,7 @@ class EventModel {
       latitude: (json['latitude'] as num?)?.toDouble(),
       longitude: (json['longitude'] as num?)?.toDouble(),
       address: json['address'] as String?,
+      venueMap: VenueMapModel.fromEventJson(json),
     );
   }
 }

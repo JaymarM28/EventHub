@@ -29,11 +29,21 @@ export class EventsService {
     // creación del evento, solo lo deja sin mapa.
     const point = await this.geocoding.geocode(dto.venue, dto.city);
 
+    if (dto.venueId !== undefined) {
+      await this.assertVenueExists(dto.venueId);
+    }
+    for (const zone of dto.zones) {
+      if (zone.venueSectionId !== undefined) {
+        await this.assertSectionBelongsToVenue(zone.venueSectionId, dto.venueId);
+      }
+    }
+
     const event = await this.prisma.event.create({
       data: {
         title: dto.title,
         description: dto.description,
         venue: dto.venue,
+        ...(dto.venueId !== undefined && { venueId: dto.venueId }),
         city: dto.city,
         category: dto.category,
         ...(dto.currency !== undefined && { currency: dto.currency }),
@@ -47,6 +57,7 @@ export class EventsService {
             name: zone.name,
             price: zone.price,
             capacity: zone.capacity,
+            ...(zone.venueSectionId !== undefined && { venueSectionId: zone.venueSectionId }),
           })),
         },
       },
@@ -56,6 +67,33 @@ export class EventsService {
     await this.publisher.publish(EVENT_TYPES.EVENT_CREATED, event);
 
     return event;
+  }
+
+  private async assertVenueExists(venueId: string) {
+    const venue = await this.prisma.venue.findUnique({ where: { id: venueId } });
+    if (!venue) {
+      throw new NotFoundException(`Establecimiento ${venueId} no existe`);
+    }
+  }
+
+  /**
+   * Una zona solo puede vincularse a una sección del mismo Venue del
+   * evento — no hay FK que lo garantice a nivel de base (Zone → VenueSection
+   * → Venue, sin pasar por Event), así que se valida acá. Requiere
+   * `eventVenueId` explícito en vez de resolverlo de la Zone porque se usa
+   * tanto al crear el evento (el venueId recién se está por guardar) como
+   * al agregar/editar una zona sobre un evento ya existente.
+   */
+  private async assertSectionBelongsToVenue(venueSectionId: string, eventVenueId: string | null | undefined) {
+    if (!eventVenueId) {
+      throw new BadRequestException(
+        'Este evento no tiene un establecimiento del catálogo asignado — no se puede vincular una sección del mapa',
+      );
+    }
+    const section = await this.prisma.venueSection.findUnique({ where: { id: venueSectionId } });
+    if (!section || section.venueId !== eventVenueId) {
+      throw new NotFoundException(`Sección ${venueSectionId} no existe en el establecimiento de este evento`);
+    }
   }
 
   /**
@@ -93,10 +131,15 @@ export class EventsService {
     });
   }
 
+  /**
+   * Incluye `venueRef.sections` a propósito, a diferencia de `findAll`/
+   * `findByOrganizer` (listados) — la vista de detalle es la que necesita
+   * el mapa completo para renderizarlo; una lista de eventos no.
+   */
   async findOne(id: string) {
     const event = await this.prisma.event.findUnique({
       where: { id },
-      include: { zones: true },
+      include: { zones: true, venueRef: { include: { sections: true } } },
     });
     if (!event) {
       throw new NotFoundException(`Evento ${id} no encontrado`);
@@ -107,6 +150,10 @@ export class EventsService {
   async update(id: string, dto: UpdateEventDto, requester: InternalUserContext) {
     const existing = await this.findOne(id); // 404 si no existe
     this.assertOwner(existing.organizerId, requester, 'editarlo');
+
+    if (dto.venueId !== undefined) {
+      await this.assertVenueExists(dto.venueId);
+    }
 
     // Re-geocodificar solo si venue/city cambiaron — evita gastar el
     // presupuesto de rate-limit de Nominatim en ediciones que no mueven la
@@ -124,6 +171,7 @@ export class EventsService {
         ...(dto.title !== undefined && { title: dto.title }),
         ...(dto.description !== undefined && { description: dto.description }),
         ...(dto.venue !== undefined && { venue: dto.venue }),
+        ...(dto.venueId !== undefined && { venueId: dto.venueId }),
         ...(dto.city !== undefined && { city: dto.city }),
         ...(dto.category !== undefined && { category: dto.category }),
         ...(dto.currency !== undefined && { currency: dto.currency }),
@@ -132,7 +180,7 @@ export class EventsService {
         ...(dto.galleryImageUrls !== undefined && { galleryImageUrls: dto.galleryImageUrls }),
         ...(point && { latitude: point.latitude, longitude: point.longitude, address: point.address }),
       },
-      include: { zones: true },
+      include: { zones: true, venueRef: { include: { sections: true } } },
     });
 
     await this.publisher.publish(EVENT_TYPES.EVENT_UPDATED, event);
@@ -242,8 +290,18 @@ export class EventsService {
     const existing = await this.findOne(id); // 404 si no existe
     this.assertOwner(existing.organizerId, requester, 'agregar zonas');
 
+    if (dto.venueSectionId !== undefined) {
+      await this.assertSectionBelongsToVenue(dto.venueSectionId, existing.venueId);
+    }
+
     await this.prisma.zone.create({
-      data: { eventId: id, name: dto.name, price: dto.price, capacity: dto.capacity },
+      data: {
+        eventId: id,
+        name: dto.name,
+        price: dto.price,
+        capacity: dto.capacity,
+        ...(dto.venueSectionId !== undefined && { venueSectionId: dto.venueSectionId }),
+      },
     });
 
     const event = await this.findOne(id);
@@ -278,12 +336,17 @@ export class EventsService {
       }
     }
 
+    if (dto.venueSectionId !== undefined) {
+      await this.assertSectionBelongsToVenue(dto.venueSectionId, existing.venueId);
+    }
+
     await this.prisma.zone.update({
       where: { id: zoneId },
       data: {
         ...(dto.name !== undefined && { name: dto.name }),
         ...(dto.price !== undefined && { price: dto.price }),
         ...(dto.capacity !== undefined && { capacity: dto.capacity }),
+        ...(dto.venueSectionId !== undefined && { venueSectionId: dto.venueSectionId }),
       },
     });
 

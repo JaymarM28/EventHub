@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import { IsInt, IsOptional, IsString, IsUrl, Min, MinLength } from 'class-validator';
 
 export class UpdateVenueDto {
   @IsOptional()
@@ -15,4 +15,8 @@ export class UpdateVenueDto {
   @IsInt()
   @Min(1)
   capacity?: number;
+
+  @IsOptional()
+  @IsUrl()
+  mapImageUrl?: string;
 }

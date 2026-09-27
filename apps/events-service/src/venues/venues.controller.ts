@@ -3,6 +3,7 @@ import { Roles } from '@event-hub/internal-auth';
 import { VenuesService } from './venues.service';
 import { CreateVenueDto } from './dto/create-venue.dto';
 import { UpdateVenueDto } from './dto/update-venue.dto';
+import { CreateVenueSectionDto, UpdateVenueSectionDto } from './dto/venue-section.dto';
 
 /**
  * Establecimientos: catálogo de plataforma. Crear/editar es exclusivo de
@@ -37,5 +38,23 @@ export class VenuesController {
   @Roles('SUPER_ADMIN')
   update(@Param('id') id: string, @Body() dto: UpdateVenueDto) {
     return this.venuesService.update(id, dto);
+  }
+
+  /** Editor del mapa de secciones — mismo permiso que crear/editar el
+   * establecimiento en sí (SUPER_ADMIN, catálogo de plataforma v1). */
+  @Post(':id/sections')
+  @Roles('SUPER_ADMIN')
+  createSection(@Param('id') id: string, @Body() dto: CreateVenueSectionDto) {
+    return this.venuesService.createSection(id, dto);
+  }
+
+  @Patch(':id/sections/:sectionId')
+  @Roles('SUPER_ADMIN')
+  updateSection(
+    @Param('id') id: string,
+    @Param('sectionId') sectionId: string,
+    @Body() dto: UpdateVenueSectionDto,
+  ) {
+    return this.venuesService.updateSection(id, sectionId, dto);
   }
 }

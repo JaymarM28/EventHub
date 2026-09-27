@@ -99,7 +99,13 @@ export function EventDetailPage() {
       </button>
 
       <EventHeader event={event} onUpdated={setEvent} />
-      <DashboardSection eventId={eventId} eventTitle={event.title} dashboard={dashboard} onZonesChanged={reloadDashboard} />
+      <DashboardSection
+        eventId={eventId}
+        eventTitle={event.title}
+        venueRef={event.venueRef}
+        dashboard={dashboard}
+        onZonesChanged={reloadDashboard}
+      />
       <StaffSection eventId={eventId} staff={staff} onStaffAdded={(s) => setStaff((prev) => [...(prev ?? []), s])} />
       <DiscountCodesSection eventId={eventId} codes={discountCodes} onChanged={reloadDiscountCodes} />
     </div>
@@ -244,11 +250,13 @@ function EventHeader({ event, onUpdated }: { event: EventItem; onUpdated: (event
 function DashboardSection({
   eventId,
   eventTitle,
+  venueRef,
   dashboard,
   onZonesChanged,
 }: {
   eventId: string;
   eventTitle: string;
+  venueRef: EventItem['venueRef'];
   dashboard: EventDashboard | null;
   onZonesChanged: () => void;
 }) {
@@ -319,6 +327,7 @@ function DashboardSection({
                     key={zone.zoneId}
                     eventId={eventId}
                     zone={zone}
+                    venueRef={venueRef}
                     onDone={() => {
                       setEditingZoneId(null);
                       onZonesChanged();
@@ -358,6 +367,7 @@ function DashboardSection({
           {showAddZone ? (
             <AddZoneForm
               eventId={eventId}
+              venueRef={venueRef}
               onDone={() => {
                 setShowAddZone(false);
                 onZonesChanged();
@@ -378,17 +388,20 @@ function DashboardSection({
 function EditZoneRow({
   eventId,
   zone,
+  venueRef,
   onDone,
   onCancel,
 }: {
   eventId: string;
   zone: EventDashboard['zones'][number];
+  venueRef: EventItem['venueRef'];
   onDone: () => void;
   onCancel: () => void;
 }) {
   const [name, setName] = useState(zone.name);
   const [price, setPrice] = useState(Number(zone.price));
   const [capacity, setCapacity] = useState(zone.capacity);
+  const [venueSectionId, setVenueSectionId] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const { showToast } = useToast();
@@ -397,7 +410,12 @@ function EditZoneRow({
     setError(null);
     setLoading(true);
     try {
-      await updateZone(eventId, zone.zoneId, { name, price, capacity });
+      await updateZone(eventId, zone.zoneId, {
+        name,
+        price,
+        capacity,
+        ...(venueSectionId !== '' && { venueSectionId }),
+      });
       showToast(`Zona ${name} actualizada`);
       onDone();
     } catch (err) {
@@ -426,6 +444,16 @@ function EditZoneRow({
             value={capacity}
             onChange={(e) => setCapacity(Number(e.target.value))}
           />
+          {(venueRef?.sections?.length ?? 0) > 0 && (
+            <select style={{ flex: 1 }} value={venueSectionId} onChange={(e) => setVenueSectionId(e.target.value)}>
+              <option value="">— Sección sin cambios —</option>
+              {(venueRef?.sections ?? []).map((section) => (
+                <option key={section.id} value={section.id}>
+                  {section.name}
+                </option>
+              ))}
+            </select>
+          )}
           <button className="btn-primary" onClick={onSave} disabled={loading}>
             {loading ? 'Guardando…' : 'Guardar'}
           </button>
@@ -442,7 +470,17 @@ function EditZoneRow({
   );
 }
 
-function AddZoneForm({ eventId, onDone, onCancel }: { eventId: string; onDone: () => void; onCancel: () => void }) {
+function AddZoneForm({
+  eventId,
+  venueRef,
+  onDone,
+  onCancel,
+}: {
+  eventId: string;
+  venueRef: EventItem['venueRef'];
+  onDone: () => void;
+  onCancel: () => void;
+}) {
   const [zone, setZone] = useState<ZoneDraft>({ name: '', price: 0, capacity: 0 });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -489,6 +527,22 @@ function AddZoneForm({ eventId, onDone, onCancel }: { eventId: string; onDone: (
           required
         />
       </div>
+      {(venueRef?.sections?.length ?? 0) > 0 && (
+        <div style={{ flex: 1 }}>
+          <label>Sección del mapa</label>
+          <select
+            value={zone.venueSectionId ?? ''}
+            onChange={(e) => setZone({ ...zone, venueSectionId: e.target.value || undefined })}
+          >
+            <option value="">— Ninguna —</option>
+            {(venueRef?.sections ?? []).map((section) => (
+              <option key={section.id} value={section.id}>
+                {section.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <div className="row" style={{ marginTop: 18 }}>
         <button className="btn-primary" type="submit" disabled={loading}>
           {loading ? 'Creando…' : 'Crear'}

@@ -64,6 +64,13 @@ model Event {
   /// — más precisa que "venue, city" tipeado por el organizador, útil para
   /// mostrar bajo el mapa. Mismo criterio nullable/best-effort que lat/lng.
   address           String?
+  /// Fase G (mapa de establecimiento): opcional y aditivo a propósito,
+  /// mismo criterio que city/coverImageUrl arriba — eventos existentes NO
+  /// apuntan a un Venue del catálogo (siguen mostrando solo el texto libre
+  /// de `venue`), y no vale la pena inventar un backfill. Un evento nuevo
+  /// puede elegir un Venue del maestro para heredar su mapa de secciones.
+  venueId     String?
+  venueRef    Venue?   @relation(fields: [venueId], references: [id], onDelete: SetNull)
   zones       Zone[]
   staff       EventStaff[]
   discountCodes DiscountCode[]
@@ -115,8 +122,17 @@ model Zone {
   name     String
   price    Decimal @db.Decimal(10, 2)
   capacity Int
+  /// Vínculo opcional al polígono del mapa de establecimiento que
+  /// representa esta zona (ver VenueSection). Nunca cambia el modelo de
+  /// venta: sigue siendo "zona con cupo", esto solo le agrega una forma
+  /// visual. Se valida en el service que la sección pertenezca al mismo
+  /// Venue que el evento (no hay esa garantía a nivel de FK cruzando
+  /// Event → Venue → VenueSection).
+  venueSectionId String?
+  venueSection   VenueSection? @relation(fields: [venueSectionId], references: [id], onDelete: SetNull)
 
   @@index([eventId])
+  @@index([venueSectionId])
   @@map("zones")
 }
 
@@ -152,8 +168,34 @@ model Venue {
   name      String
   address   String
   capacity  Int?
+  /// Imagen de fondo del mapa de secciones (ej. el plano del estadio/arena)
+  /// — mismo criterio que Event.coverImageUrl: URL directa, sin subida de
+  /// binarios propia. Nullable: un establecimiento puede existir en el
+  /// catálogo sin tener todavía un mapa cargado.
+  mapImageUrl String?
+  sections  VenueSection[]
+  events    Event[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@map("venues")
+}
+
+/// Un polígono clickeable sobre `Venue.mapImageUrl` (ej. "Platea Norte",
+/// "Palco VIP"). No es el modelo de venta — eso lo sigue siendo Zone,
+/// vía Zone.venueSectionId — esto es puramente la forma visual.
+model VenueSection {
+  id      String @id @default(uuid())
+  venueId String
+  venue   Venue  @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  name    String
+  /// Puntos del polígono en coordenadas normalizadas 0.0–1.0 (relativas al
+  /// ancho/alto de la imagen, no píxeles absolutos) — así el mapa se ve
+  /// igual sin importar el tamaño de pantalla o de la imagen subida.
+  /// Formato: [[x0,y0],[x1,y1],...], mínimo 3 puntos (validado en el DTO).
+  points  Json
+  zones   Zone[]
+
+  @@index([venueId])
+  @@map("venue_sections")
 }

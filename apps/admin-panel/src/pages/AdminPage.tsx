@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { createOrganizer, listUsers, updateUserRoles, type PlatformUser } from '../api/admin';
 import { createVenue, listVenues, updateVenue, type Venue, type VenueInput } from '../api/venues';
 import { extractErrorMessage } from '../api/client';
@@ -363,7 +364,7 @@ function VenuesSection({ venues, onChanged }: { venues: Venue[] | null; onChange
       <div className="row-between section-header" style={{ marginBottom: 16 }}>
         <div>
           <h2>Establecimientos</h2>
-          <p className="subtitle">Catálogo de venues — todavía sin ligar a eventos (ver roadmap #18).</p>
+          <p className="subtitle">Catálogo de venues, con mapa de secciones por establecimiento.</p>
         </div>
         <button className="btn-secondary" onClick={() => setShowAddForm((v) => !v)}>
           {showAddForm ? 'Cancelar' : '+ Agregar establecimiento'}
@@ -421,9 +422,14 @@ function VenuesSection({ venues, onChanged }: { venues: Venue[] | null; onChange
                   <td>{venue.address}</td>
                   <td>{venue.capacity ?? '—'}</td>
                   <td>
-                    <button className="btn-ghost" onClick={() => setEditingId(venue.id)}>
-                      Editar
-                    </button>
+                    <div className="row" style={{ gap: 8 }}>
+                      <button className="btn-ghost" onClick={() => setEditingId(venue.id)}>
+                        Editar
+                      </button>
+                      <Link className="btn-ghost" to={`/admin/venues/${venue.id}/map`}>
+                        Mapa de secciones
+                      </Link>
+                    </div>
                   </td>
                 </tr>
               ),
@@ -455,6 +461,7 @@ function VenueForm({
   const [name, setName] = useState(initial?.name ?? '');
   const [address, setAddress] = useState(initial?.address ?? '');
   const [capacity, setCapacity] = useState<number | ''>(initial?.capacity ?? '');
+  const [mapImageUrl, setMapImageUrl] = useState(initial?.mapImageUrl ?? '');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const { showToast } = useToast();
@@ -464,7 +471,12 @@ function VenueForm({
     setError(null);
     setLoading(true);
     try {
-      await onSubmit({ name, address, capacity: capacity === '' ? undefined : Number(capacity) });
+      await onSubmit({
+        name,
+        address,
+        capacity: capacity === '' ? undefined : Number(capacity),
+        mapImageUrl: mapImageUrl.trim() === '' ? undefined : mapImageUrl.trim(),
+      });
       showToast(initial ? `${name} actualizado` : `${name} agregado`);
       onDone();
     } catch (err) {
@@ -475,30 +487,43 @@ function VenueForm({
   };
 
   return (
-    <form className="row" onSubmit={onSave} style={{ marginBottom: inline ? 0 : 16, alignItems: 'flex-end' }}>
-      <div style={{ flex: 2 }}>
-        <label>Nombre</label>
-        <input value={name} onChange={(e) => setName(e.target.value)} required />
+    <form className="stack" onSubmit={onSave} style={{ marginBottom: inline ? 0 : 16, gap: 12 }}>
+      <div className="row" style={{ alignItems: 'flex-end' }}>
+        <div style={{ flex: 2 }}>
+          <label>Nombre</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} required />
+        </div>
+        <div style={{ flex: 2 }}>
+          <label>Dirección</label>
+          <input value={address} onChange={(e) => setAddress(e.target.value)} required />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label>Capacidad (opcional)</label>
+          <input
+            type="number"
+            min={1}
+            value={capacity}
+            onChange={(e) => setCapacity(e.target.value === '' ? '' : Number(e.target.value))}
+          />
+        </div>
       </div>
-      <div style={{ flex: 2 }}>
-        <label>Dirección</label>
-        <input value={address} onChange={(e) => setAddress(e.target.value)} required />
-      </div>
-      <div style={{ flex: 1 }}>
-        <label>Capacidad (opcional)</label>
+      <div>
+        <label>Imagen del mapa (opcional — plano del venue, ej. la vista del estadio)</label>
         <input
-          type="number"
-          min={1}
-          value={capacity}
-          onChange={(e) => setCapacity(e.target.value === '' ? '' : Number(e.target.value))}
+          type="url"
+          placeholder="https://…"
+          value={mapImageUrl}
+          onChange={(e) => setMapImageUrl(e.target.value)}
         />
       </div>
-      <button className="btn-primary" type="submit" disabled={loading}>
-        {loading ? 'Guardando…' : submitLabel}
-      </button>
-      <button type="button" className="btn-ghost" onClick={onCancel}>
-        Cancelar
-      </button>
+      <div className="row">
+        <button className="btn-primary" type="submit" disabled={loading}>
+          {loading ? 'Guardando…' : submitLabel}
+        </button>
+        <button type="button" className="btn-ghost" onClick={onCancel}>
+          Cancelar
+        </button>
+      </div>
       {error && <p className="error-text">{error}</p>}
     </form>
   );

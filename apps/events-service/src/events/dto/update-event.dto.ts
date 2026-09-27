@@ -24,6 +24,10 @@ export class UpdateEventDto {
 
   @IsOptional()
   @IsString()
+  venueId?: string;
+
+  @IsOptional()
+  @IsString()
   city?: string;
 
   @IsOptional()

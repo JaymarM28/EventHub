@@ -7,6 +7,7 @@ import { LoginPage } from './pages/LoginPage';
 import { MyEventsPage } from './pages/MyEventsPage';
 import { EventDetailPage } from './pages/EventDetailPage';
 import { AdminPage } from './pages/AdminPage';
+import { VenueMapPage } from './pages/VenueMapPage';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { token } = useAuth();
@@ -50,6 +51,14 @@ function Shell() {
         element={
           <RequireSuperAdmin>
             <AdminPage />
+          </RequireSuperAdmin>
+        }
+      />
+      <Route
+        path="/admin/venues/:id/map"
+        element={
+          <RequireSuperAdmin>
+            <VenueMapPage />
           </RequireSuperAdmin>
         }
       />
