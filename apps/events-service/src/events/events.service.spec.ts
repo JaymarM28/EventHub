@@ -40,7 +40,7 @@ describe('EventsService', () => {
   };
   let publisher: { publish: jest.Mock };
   let authClient: { createStaffUser: jest.Mock };
-  let ticketsClient: { soldCountByZone: jest.Mock };
+  let ticketsClient: { soldCountByZone: jest.Mock; salesByDay: jest.Mock };
   let geocoding: { geocode: jest.Mock };
 
   const organizer: InternalUserContext = {
@@ -89,7 +89,7 @@ describe('EventsService', () => {
     };
     publisher = { publish: jest.fn().mockResolvedValue(undefined) };
     authClient = { createStaffUser: jest.fn() };
-    ticketsClient = { soldCountByZone: jest.fn().mockResolvedValue([]) };
+    ticketsClient = { soldCountByZone: jest.fn().mockResolvedValue([]), salesByDay: jest.fn().mockResolvedValue([]) };
     geocoding = { geocode: jest.fn().mockResolvedValue(null) };
 
     const moduleRef = await Test.createTestingModule({
@@ -324,6 +324,30 @@ describe('EventsService', () => {
       expect(result.totalCapacity).toBe(60);
       expect(result.totalSold).toBe(20);
       expect(result.totalRevenue).toBe(2000);
+    });
+
+    it('arma el timeline diario sumando ventas de todas las zonas por día', async () => {
+      prisma.event.findUnique.mockResolvedValue({
+        id: 'ev-1',
+        organizerId: organizer.userId,
+        zones: [
+          { id: 'zone-1', name: 'General', price: 100, capacity: 50 },
+          { id: 'zone-2', name: 'VIP', price: 200, capacity: 10 },
+        ],
+      });
+      ticketsClient.salesByDay.mockResolvedValue([
+        { zoneId: 'zone-1', day: '2026-09-20', count: 3 },
+        { zoneId: 'zone-2', day: '2026-09-20', count: 1 },
+        { zoneId: 'zone-1', day: '2026-09-21', count: 2 },
+      ]);
+
+      const result = await service.dashboard('ev-1', organizer);
+
+      expect(ticketsClient.salesByDay).toHaveBeenCalledWith(['zone-1', 'zone-2']);
+      expect(result.salesTimeline).toEqual([
+        { day: '2026-09-20', sold: 4, revenue: 500 },
+        { day: '2026-09-21', sold: 2, revenue: 200 },
+      ]);
     });
 
     it('rechaza a quien no es dueño del evento', async () => {

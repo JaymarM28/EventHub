@@ -8,6 +8,12 @@ export interface ZoneSales {
   sold: number;
 }
 
+export interface ZoneSalesByDay {
+  zoneId: string;
+  day: string;
+  count: number;
+}
+
 /**
  * Llamada síncrona de solo lectura a tickets-service para el dashboard del
  * organizador (admin panel) — a diferencia de las otras llamadas
@@ -41,6 +47,24 @@ export class TicketsClientService {
       // si tickets-service no responde, se muestra "sold: 0" en vez de
       // romper toda la pantalla del organizador.
       this.logger.error(`tickets-service no respondió al pedir el resumen de ventas: ${(err as Error).message}`);
+      return [];
+    }
+  }
+
+  async salesByDay(zoneIds: string[]): Promise<ZoneSalesByDay[]> {
+    if (zoneIds.length === 0) return [];
+    try {
+      const response = await firstValueFrom(
+        this.http.get<ZoneSalesByDay[]>(`${this.baseUrl}/internal/tickets/sales-by-day`, {
+          params: { zoneIds: zoneIds.join(',') },
+        }),
+      );
+      return response.data;
+    } catch (err) {
+      // Mismo criterio que soldCountByZone: el gráfico del dashboard no es
+      // un flujo crítico — si tickets-service no responde, se muestra el
+      // dashboard sin el gráfico en vez de romper toda la pantalla.
+      this.logger.error(`tickets-service no respondió al pedir ventas por día: ${(err as Error).message}`);
       return [];
     }
   }

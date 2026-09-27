@@ -27,6 +27,8 @@ import { useDashboardSocket } from '../hooks/useDashboardSocket';
 import { Pagination, usePagination } from '../components/Pagination';
 import { Skeleton, TableSkeleton } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
+import { SalesChart } from '../components/SalesChart';
+import { downloadCsv } from '../components/csv';
 
 export function EventDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -97,7 +99,7 @@ export function EventDetailPage() {
       </button>
 
       <EventHeader event={event} onUpdated={setEvent} />
-      <DashboardSection eventId={eventId} dashboard={dashboard} onZonesChanged={reloadDashboard} />
+      <DashboardSection eventId={eventId} eventTitle={event.title} dashboard={dashboard} onZonesChanged={reloadDashboard} />
       <StaffSection eventId={eventId} staff={staff} onStaffAdded={(s) => setStaff((prev) => [...(prev ?? []), s])} />
       <DiscountCodesSection eventId={eventId} codes={discountCodes} onChanged={reloadDiscountCodes} />
     </div>
@@ -241,21 +243,53 @@ function EventHeader({ event, onUpdated }: { event: EventItem; onUpdated: (event
 
 function DashboardSection({
   eventId,
+  eventTitle,
   dashboard,
   onZonesChanged,
 }: {
   eventId: string;
+  eventTitle: string;
   dashboard: EventDashboard | null;
   onZonesChanged: () => void;
 }) {
   const [editingZoneId, setEditingZoneId] = useState<string | null>(null);
   const [showAddZone, setShowAddZone] = useState(false);
 
+  const exportZonesCsv = () => {
+    if (!dashboard) return;
+    downloadCsv(
+      `ventas-${slugify(eventTitle)}.csv`,
+      ['Zona', 'Precio', 'Vendidos', 'Cupo', 'Ingresos'],
+      dashboard.zones.map((z) => [z.name, Number(z.price), z.sold, z.capacity, z.revenue]),
+    );
+  };
+
+  const exportTimelineCsv = () => {
+    if (!dashboard) return;
+    downloadCsv(
+      `ventas-por-dia-${slugify(eventTitle)}.csv`,
+      ['Día', 'Boletos vendidos', 'Ingresos'],
+      dashboard.salesTimeline.map((e) => [e.day, e.sold, e.revenue]),
+    );
+  };
+
   return (
     <div className="card">
-      <div className="section-header">
-        <h2>Ventas y aforo</h2>
-        <p className="subtitle">Se actualiza solo cuando se vende un boleto — sin recargar la página.</p>
+      <div className="section-header row-between">
+        <div>
+          <h2>Ventas y aforo</h2>
+          <p className="subtitle">Se actualiza solo cuando se vende un boleto — sin recargar la página.</p>
+        </div>
+        {dashboard && (
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn-ghost" onClick={exportZonesCsv}>
+              Exportar zonas (CSV)
+            </button>
+            <button className="btn-ghost" onClick={exportTimelineCsv} disabled={dashboard.salesTimeline.length === 0}>
+              Exportar ventas por día (CSV)
+            </button>
+          </div>
+        )}
       </div>
       {!dashboard && <div style={{ marginTop: 16 }}><TableSkeleton cols={6} /></div>}
       {dashboard && (
@@ -263,6 +297,9 @@ function DashboardSection({
           <div className="row" style={{ marginTop: 16, marginBottom: 20, gap: 12 }}>
             <Stat label="Vendidos" value={`${dashboard.totalSold} / ${dashboard.totalCapacity}`} />
             <Stat label="Ingresos" value={formatMoney(dashboard.totalRevenue)} />
+          </div>
+          <div style={{ marginBottom: 20 }}>
+            <SalesChart entries={dashboard.salesTimeline} />
           </div>
           <table>
             <thead>
@@ -796,4 +833,13 @@ function CreateDiscountCodeForm({ eventId, onCreated }: { eventId: string; onCre
 
 function formatMoney(amount: number): string {
   return new Intl.NumberFormat('es', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(amount);
+}
+
+function slugify(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 }

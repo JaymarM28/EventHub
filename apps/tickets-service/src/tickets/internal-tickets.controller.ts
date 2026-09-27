@@ -40,6 +40,15 @@ export class InternalTicketsController {
     return this.ticketsService.soldCountByZone(ids);
   }
 
+  /** Usado por events-service para el gráfico de ventas por día del
+   * dashboard del organizador — mismo motivo de @Public() que `summary`. */
+  @Get('sales-by-day')
+  @Public()
+  salesByDay(@Query('zoneIds') zoneIds: string) {
+    const ids = zoneIds ? zoneIds.split(',').filter(Boolean) : [];
+    return this.ticketsService.salesByDay(ids);
+  }
+
   /** Solo lectura — ver el comentario en TicketsService.peek(). Público:
    * lo llama el consumidor RMQ de api-gateway (sin request HTTP de la que
    * colgar un contexto de usuario), además de access-service. */

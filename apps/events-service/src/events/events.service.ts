@@ -189,7 +189,11 @@ export class EventsService {
     const existing = await this.findOne(id); // 404 si no existe
     this.assertOwner(existing.organizerId, requester, 'ver su dashboard');
 
-    const sales = await this.ticketsClient.soldCountByZone(existing.zones.map((z) => z.id));
+    const zoneIds = existing.zones.map((z) => z.id);
+    const [sales, salesByDay] = await Promise.all([
+      this.ticketsClient.soldCountByZone(zoneIds),
+      this.ticketsClient.salesByDay(zoneIds),
+    ]);
     const soldByZone = new Map(sales.map((s) => [s.zoneId, s.sold]));
 
     const zones = existing.zones.map((zone) => {
@@ -204,12 +208,29 @@ export class EventsService {
       };
     });
 
+    // Agrega el conteo por-zona-por-día en un timeline por-día para el
+    // gráfico del dashboard — el ingreso por día se aproxima igual que el
+    // ingreso por zona (precio × vendidos), mismo criterio de arriba.
+    const priceByZone = new Map(existing.zones.map((z) => [z.id, Number(z.price)]));
+    const byDay = new Map<string, { sold: number; revenue: number }>();
+    for (const row of salesByDay) {
+      const price = priceByZone.get(row.zoneId) ?? 0;
+      const entry = byDay.get(row.day) ?? { sold: 0, revenue: 0 };
+      entry.sold += row.count;
+      entry.revenue += price * row.count;
+      byDay.set(row.day, entry);
+    }
+    const salesTimeline = Array.from(byDay.entries())
+      .map(([day, v]) => ({ day, sold: v.sold, revenue: v.revenue }))
+      .sort((a, b) => a.day.localeCompare(b.day));
+
     return {
       eventId: id,
       zones,
       totalCapacity: zones.reduce((sum, z) => sum + z.capacity, 0),
       totalSold: zones.reduce((sum, z) => sum + z.sold, 0),
       totalRevenue: zones.reduce((sum, z) => sum + z.revenue, 0),
+      salesTimeline,
     };
   }
 

@@ -12,6 +12,7 @@ describe('TicketsService', () => {
   let prisma: {
     processedEvent: { findUnique: jest.Mock; create: jest.Mock };
     $transaction: jest.Mock;
+    $queryRaw: jest.Mock;
     ticket: {
       updateMany: jest.Mock;
       findUnique: jest.Mock;
@@ -48,6 +49,7 @@ describe('TicketsService', () => {
     prisma = {
       processedEvent: { findUnique: jest.fn(), create: jest.fn() },
       $transaction: jest.fn(async (cb) => cb(tx)),
+      $queryRaw: jest.fn(),
       ticket: {
         updateMany: jest.fn(),
         findUnique: jest.fn(),
@@ -389,6 +391,29 @@ describe('TicketsService', () => {
 
       expect(result).toEqual([]);
       expect(prisma.ticket.groupBy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('salesByDay', () => {
+    it('agrupa boletos vendidos por zona y día, con day como string YYYY-MM-DD', async () => {
+      prisma.$queryRaw.mockResolvedValue([
+        { zoneId: 'zone-1', day: new Date('2026-09-20T00:00:00Z'), count: 3n },
+        { zoneId: 'zone-1', day: new Date('2026-09-21T00:00:00Z'), count: 2n },
+      ]);
+
+      const result = await service.salesByDay(['zone-1']);
+
+      expect(result).toEqual([
+        { zoneId: 'zone-1', day: '2026-09-20', count: 3 },
+        { zoneId: 'zone-1', day: '2026-09-21', count: 2 },
+      ]);
+    });
+
+    it('devuelve [] sin consultar la base si no hay zoneIds', async () => {
+      const result = await service.salesByDay([]);
+
+      expect(result).toEqual([]);
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
     });
   });
 });

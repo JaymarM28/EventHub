@@ -162,6 +162,25 @@ export class TicketsService {
   }
 
   /**
+   * Conteo de boletos emitidos por día para el gráfico de ventas del
+   * dashboard del organizador (admin panel). `groupBy` de Prisma no trunca
+   * fechas de forma portable, así que se usa SQL crudo — mismo patrón que
+   * `redeemDiscountCode` en events-service para lecturas que Prisma no
+   * expresa directamente.
+   */
+  async salesByDay(zoneIds: string[]): Promise<{ zoneId: string; day: string; count: number }[]> {
+    if (zoneIds.length === 0) return [];
+    const rows = await this.prisma.$queryRaw<{ zoneId: string; day: Date; count: bigint }[]>`
+      SELECT "zoneId", date_trunc('day', "createdAt") AS day, COUNT(*) AS count
+      FROM tickets
+      WHERE "zoneId" = ANY(${zoneIds})
+      GROUP BY "zoneId", day
+      ORDER BY day ASC
+    `;
+    return rows.map((r) => ({ zoneId: r.zoneId, day: r.day.toISOString().slice(0, 10), count: Number(r.count) }));
+  }
+
+  /**
    * Lectura SIN efectos secundarios — a diferencia de `validateScan`, que
    * marca el boleto como usado en el mismo paso en que lo consulta.
    * access-service necesita saber a qué evento pertenece el boleto ANTES

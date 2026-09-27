@@ -74,12 +74,19 @@ export interface ZoneDashboard {
   revenue: number;
 }
 
+export interface SalesTimelineEntry {
+  day: string;
+  sold: number;
+  revenue: number;
+}
+
 export interface EventDashboard {
   eventId: string;
   zones: ZoneDashboard[];
   totalCapacity: number;
   totalSold: number;
   totalRevenue: number;
+  salesTimeline: SalesTimelineEntry[];
 }
 
 export interface StaffMember {
