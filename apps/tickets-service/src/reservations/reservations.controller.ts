@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Param, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Param, Post } from '@nestjs/common';
 import { InternalUser, InternalUserContext } from '@event-hub/internal-auth';
 import { ReservationsService } from './reservations.service';
 import { CreateReservationDto } from './dto/create-reservation.dto';
@@ -15,6 +15,15 @@ export class ReservationsController {
 
   @Post()
   create(@Body() dto: CreateReservationDto, @InternalUser() user: InternalUserContext) {
+    if (dto.seatIds !== undefined && dto.quantity !== undefined) {
+      throw new BadRequestException('Enviá quantity o seatIds, no ambos');
+    }
+    if (dto.seatIds !== undefined) {
+      return this.reservationsService.reserveSeats(dto.zoneId, user.userId, dto.seatIds);
+    }
+    if (dto.quantity === undefined) {
+      throw new BadRequestException('Falta quantity o seatIds');
+    }
     return this.reservationsService.reserve(dto.zoneId, user.userId, dto.quantity);
   }
 

@@ -13,6 +13,7 @@ import { UpdateEventDto } from './dto/update-event.dto';
 import { FindEventsQueryDto } from './dto/find-events-query.dto';
 import { AddStaffDto } from './dto/add-staff.dto';
 import { CreateZoneDto, UpdateZoneDto } from './dto/zone.dto';
+import { GenerateSeatsDto } from './dto/generate-seats.dto';
 import { CreateDiscountCodeDto, UpdateDiscountCodeDto } from './dto/discount-code.dto';
 
 @Controller('events')
@@ -94,6 +95,17 @@ export class EventsController {
     @InternalUser() user: InternalUserContext,
   ) {
     return this.eventsService.updateZone(id, zoneId, dto, user);
+  }
+
+  @Post(':id/zones/:zoneId/seats/generate')
+  @Roles('ORGANIZER', 'SUPER_ADMIN')
+  generateSeats(
+    @Param('id') id: string,
+    @Param('zoneId') zoneId: string,
+    @Body() dto: GenerateSeatsDto,
+    @InternalUser() user: InternalUserContext,
+  ) {
+    return this.eventsService.generateSeats(id, zoneId, dto, user);
   }
 
   @Post(':id/discount-codes')

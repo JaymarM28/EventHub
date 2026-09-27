@@ -9,6 +9,7 @@ import { UpdateEventDto } from './dto/update-event.dto';
 import { FindEventsQueryDto } from './dto/find-events-query.dto';
 import { AddStaffDto } from './dto/add-staff.dto';
 import { CreateZoneDto, UpdateZoneDto } from './dto/zone.dto';
+import { GenerateSeatsDto } from './dto/generate-seats.dto';
 import { CreateDiscountCodeDto, UpdateDiscountCodeDto } from './dto/discount-code.dto';
 import { AuthClientService } from './auth-client.service';
 import { TicketsClientService } from './tickets-client.service';
@@ -353,6 +354,56 @@ export class EventsService {
     const event = await this.findOne(id);
     await this.publisher.publish(EVENT_TYPES.EVENT_UPDATED, event);
     return event;
+  }
+
+  /**
+   * Fase 2 (asiento individual): genera el catálogo completo de butacas
+   * de una zona de una sola vez. Sin `delete`/regenerar a propósito (mismo
+   * criterio que Venue/VenueSection) — si hace falta cambiar el trazado,
+   * es más simple crear una zona nueva que mutar butacas que ya podrían
+   * tener boletos vendidos en tickets-service.
+   */
+  async generateSeats(id: string, zoneId: string, dto: GenerateSeatsDto, requester: InternalUserContext) {
+    const existing = await this.findOne(id); // 404 si no existe
+    this.assertOwner(existing.organizerId, requester, 'generar butacas');
+
+    const zone = existing.zones.find((z) => z.id === zoneId);
+    if (!zone) {
+      throw new NotFoundException(`Zona ${zoneId} no encontrada en este evento`);
+    }
+
+    const alreadyHasSeats = await this.prisma.seat.count({ where: { zoneId } });
+    if (alreadyHasSeats > 0) {
+      throw new BadRequestException(
+        'Esta zona ya tiene butacas generadas — no se puede regenerar (crear una zona nueva si el trazado cambió)',
+      );
+    }
+
+    const totalSeats = dto.rowLabels.length * dto.seatsPerRow;
+    if (totalSeats > zone.capacity) {
+      throw new BadRequestException(
+        `${totalSeats} butacas superan el cupo de la zona (${zone.capacity}) — ajustá el cupo o la cantidad de filas/asientos`,
+      );
+    }
+
+    await this.prisma.seat.createMany({
+      data: dto.rowLabels.flatMap((rowLabel) =>
+        Array.from({ length: dto.seatsPerRow }, (_, i) => ({ zoneId, rowLabel, seatNumber: i + 1 })),
+      ),
+    });
+
+    // A diferencia de create/addZone/updateZone, este publish SÍ necesita
+    // las butacas en el payload — es el único cambio que le importa a
+    // tickets-service.ZonesSyncConsumer para poblar su copia local de
+    // Seat. El resto de los flujos de evento.updated no las incluyen a
+    // propósito (ver findOne) para no sobre-pedir en cada fetch de evento.
+    const eventWithSeats = await this.prisma.event.findUniqueOrThrow({
+      where: { id },
+      include: { zones: { include: { seats: true } } },
+    });
+    await this.publisher.publish(EVENT_TYPES.EVENT_UPDATED, eventWithSeats);
+
+    return this.findOne(id);
   }
 
   /** #23 — código en mayúsculas siempre (evita que "AMIGOS20" y

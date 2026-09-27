@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { DomainEventsPublisher } from '../messaging/domain-events.publisher';
 import { AuthClientService } from './auth-client.service';
+import { Prisma } from '../../generated/prisma-client';
 
 describe('TicketsService', () => {
   let service: TicketsService;
@@ -22,13 +23,14 @@ describe('TicketsService', () => {
       update: jest.Mock;
     };
     eventZone: { findUnique: jest.Mock; findMany: jest.Mock };
+    seat: { findMany: jest.Mock };
   };
   let tx: {
     $queryRaw: jest.Mock;
     ticket: { count: jest.Mock; create: jest.Mock };
     processedEvent: { create: jest.Mock };
   };
-  let redis: { release: jest.Mock };
+  let redis: { release: jest.Mock; releaseSeats: jest.Mock };
   let publisher: { publish: jest.Mock };
   let authClient: { findByEmail: jest.Mock };
 
@@ -59,8 +61,9 @@ describe('TicketsService', () => {
         update: jest.fn(),
       },
       eventZone: { findUnique: jest.fn(), findMany: jest.fn() },
+      seat: { findMany: jest.fn().mockResolvedValue([]) },
     };
-    redis = { release: jest.fn().mockResolvedValue(undefined) };
+    redis = { release: jest.fn().mockResolvedValue(undefined), releaseSeats: jest.fn().mockResolvedValue(undefined) };
     publisher = { publish: jest.fn().mockResolvedValue(undefined) };
     authClient = { findByEmail: jest.fn() };
 
@@ -162,6 +165,67 @@ describe('TicketsService', () => {
     );
     expect(tx.ticket.create).not.toHaveBeenCalled();
     expect(publisher.publish).not.toHaveBeenCalled();
+  });
+
+  describe('confirmFromOrder — asiento individual (Fase 2)', () => {
+    const seatPayload = {
+      orderId: 'order-seats',
+      userId: 'user-1',
+      zoneId: 'zone-1',
+      reservationId: 'res-seats',
+      quantity: 2,
+      seatIds: ['seat-1', 'seat-2'],
+    };
+
+    it('crea un ticket por butaca (con seatId) y libera el hold de asientos, no el de zona', async () => {
+      prisma.processedEvent.findUnique.mockResolvedValue(null);
+      tx.ticket.create.mockResolvedValue({});
+
+      await service.confirmFromOrder('ev-seats-1', seatPayload);
+
+      expect(tx.ticket.create).toHaveBeenCalledTimes(2);
+      expect(tx.ticket.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ seatId: 'seat-1' }) }),
+      );
+      expect(tx.ticket.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ seatId: 'seat-2' }) }),
+      );
+      // No debe tocar el camino de capacidad por zona (sin FOR UPDATE de event_zones).
+      expect(tx.$queryRaw).not.toHaveBeenCalled();
+      expect(redis.releaseSeats).toHaveBeenCalledWith('res-seats', ['seat-1', 'seat-2']);
+      expect(redis.release).not.toHaveBeenCalled();
+    });
+
+    it('GARANTÍA DURA (asiento): si una butaca ya fue vendida (choque de índice único), rechaza y no emite NINGÚN boleto de la orden', async () => {
+      prisma.processedEvent.findUnique.mockResolvedValue(null);
+      const uniqueViolation = new Prisma.PrismaClientKnownRequestError('Unique constraint failed on seatId', {
+        code: 'P2002',
+        clientVersion: 'test',
+      });
+      prisma.$transaction.mockImplementation(async () => {
+        throw uniqueViolation;
+      });
+
+      await expect(service.confirmFromOrder('ev-seats-2', seatPayload)).rejects.toThrow(/ya estaban vendidas/);
+      expect(publisher.publish).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('seatsForZone', () => {
+    it('marca como vendidas las butacas que ya tienen un ticket', async () => {
+      prisma.seat.findMany.mockResolvedValue([
+        { id: 'seat-1', rowLabel: 'A', seatNumber: 1 },
+        { id: 'seat-2', rowLabel: 'A', seatNumber: 2 },
+      ]);
+      prisma.ticket.findMany.mockResolvedValue([{ seatId: 'seat-1' }]);
+
+      const result = await service.seatsForZone('zone-1');
+
+      expect(result).toEqual([
+        { id: 'seat-1', rowLabel: 'A', seatNumber: 1, sold: true },
+        { id: 'seat-2', rowLabel: 'A', seatNumber: 2, sold: false },
+      ]);
+    });
   });
 
   describe('findByUser', () => {

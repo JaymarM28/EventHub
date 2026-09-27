@@ -17,6 +17,7 @@ describe('EventsService', () => {
       create: jest.Mock;
       findMany: jest.Mock;
       findUnique: jest.Mock;
+      findUniqueOrThrow: jest.Mock;
       update: jest.Mock;
     };
     eventStaff: {
@@ -37,6 +38,7 @@ describe('EventsService', () => {
     };
     venue: { findUnique: jest.Mock };
     venueSection: { findUnique: jest.Mock };
+    seat: { count: jest.Mock; createMany: jest.Mock };
     $transaction: jest.Mock;
     $queryRaw: jest.Mock;
   };
@@ -68,6 +70,7 @@ describe('EventsService', () => {
         create: jest.fn(),
         findMany: jest.fn(),
         findUnique: jest.fn(),
+        findUniqueOrThrow: jest.fn(),
         update: jest.fn(),
       },
       eventStaff: {
@@ -88,6 +91,7 @@ describe('EventsService', () => {
       },
       venue: { findUnique: jest.fn() },
       venueSection: { findUnique: jest.fn() },
+      seat: { count: jest.fn().mockResolvedValue(0), createMany: jest.fn() },
       $transaction: jest.fn((fn) => fn(prisma)),
       $queryRaw: jest.fn(),
     };
@@ -556,6 +560,57 @@ describe('EventsService', () => {
         service.updateZone('ev-1', 'zone-1', { venueSectionId: 'sec-1' }, organizer),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(prisma.zone.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('generateSeats', () => {
+    const eventWithZone = {
+      id: 'ev-1',
+      organizerId: organizer.userId,
+      zones: [{ id: 'zone-1', name: 'General', price: 50, capacity: 100 }],
+    };
+
+    it('genera filas x asientos por fila y publica event.updated con las butacas', async () => {
+      prisma.event.findUnique.mockResolvedValue(eventWithZone);
+      prisma.event.findUniqueOrThrow.mockResolvedValue({ id: 'ev-1', zones: [] });
+
+      await service.generateSeats('ev-1', 'zone-1', { rowLabels: ['A', 'B'], seatsPerRow: 10 }, organizer);
+
+      expect(prisma.seat.createMany).toHaveBeenCalledWith({
+        data: [
+          ...Array.from({ length: 10 }, (_, i) => ({ zoneId: 'zone-1', rowLabel: 'A', seatNumber: i + 1 })),
+          ...Array.from({ length: 10 }, (_, i) => ({ zoneId: 'zone-1', rowLabel: 'B', seatNumber: i + 1 })),
+        ],
+      });
+      expect(publisher.publish).toHaveBeenCalledWith('event.updated', expect.objectContaining({ id: 'ev-1' }));
+    });
+
+    it('rechaza generar de nuevo si la zona ya tiene butacas', async () => {
+      prisma.event.findUnique.mockResolvedValue(eventWithZone);
+      prisma.seat.count.mockResolvedValue(20);
+
+      await expect(
+        service.generateSeats('ev-1', 'zone-1', { rowLabels: ['A'], seatsPerRow: 10 }, organizer),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.seat.createMany).not.toHaveBeenCalled();
+    });
+
+    it('rechaza si el total de butacas supera el cupo de la zona', async () => {
+      prisma.event.findUnique.mockResolvedValue(eventWithZone);
+
+      await expect(
+        service.generateSeats('ev-1', 'zone-1', { rowLabels: ['A', 'B'], seatsPerRow: 60 }, organizer),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.seat.createMany).not.toHaveBeenCalled();
+    });
+
+    it('rechaza a quien no es dueño del evento', async () => {
+      prisma.event.findUnique.mockResolvedValue(eventWithZone);
+
+      await expect(
+        service.generateSeats('ev-1', 'zone-1', { rowLabels: ['A'], seatsPerRow: 10 }, otherOrganizer),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.seat.createMany).not.toHaveBeenCalled();
     });
   });
 

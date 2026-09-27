@@ -28,6 +28,21 @@ model EventZone {
   @@map("event_zones")
 }
 
+/// Read-model local de las butacas de una zona (fuente de verdad:
+/// events-service, ver Seat en su schema.prisma) — sincronizado vía
+/// event.updated cuando el organizador genera butacas (ZonesConsumer). Sin
+/// esto, cada reserva de asiento tendría que llamarle a events-service en
+/// vivo durante el checkout, la misma razón por la que EventZone existe.
+model Seat {
+  id         String @id // mismo id que en events-service
+  zoneId     String
+  rowLabel   String
+  seatNumber Int
+
+  @@index([zoneId])
+  @@map("seats")
+}
+
 /// El boleto confirmado — la fuente de verdad contra sobreventa es el COUNT
 /// de esta tabla dentro de una transacción con lock de fila sobre EventZone
 /// (ver TicketsService.confirmFromOrder). La reserva en Redis es un "soft
@@ -49,6 +64,14 @@ model Ticket {
   /// el amigo tenga cuenta, solo identifica para quién es cada boleto
   /// dentro de una orden con quantity>1. Editable solo por el dueño.
   assignedToName String?
+  /// Fase 2 (asiento individual): null para boletos "por cupo" (zonas sin
+  /// Seats generadas — como siempre funcionó). El `@unique` ES la garantía
+  /// dura anti-doble-venta de una butaca puntual: dos transacciones
+  /// intentando crear un Ticket para el mismo seatId, Postgres rechaza la
+  /// segunda con una violación de constraint — no hace falta un
+  /// `SELECT...FOR UPDATE` como en la zona (confirmFromOrder), acá el
+  /// índice único lo garantiza solo, sin lock manual.
+  seatId String? @unique
 
   @@index([zoneId])
   @@index([userId])

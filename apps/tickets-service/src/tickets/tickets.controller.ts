@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Patch } from '@nestjs/common';
-import { InternalHeaders, InternalUser, InternalUserContext, RawInternalHeaders } from '@event-hub/internal-auth';
+import { InternalHeaders, InternalUser, InternalUserContext, Public, RawInternalHeaders } from '@event-hub/internal-auth';
 import { TicketsService } from './tickets.service';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
 import { TransferTicketDto } from './dto/transfer-ticket.dto';
@@ -11,6 +11,17 @@ export class TicketsController {
   @Get('mine')
   findMine(@InternalUser() user: InternalUserContext) {
     return this.ticketsService.findByUser(user.userId);
+  }
+
+  /** Fase 2 (asiento individual) — mapa de disponibilidad de butacas de
+   * una zona. @Public() a nivel de este servicio (no necesita el contexto
+   * de un usuario específico) — igual requiere JWT en la práctica porque
+   * api-gateway exige auth para todo el prefijo /tickets (routes.ts,
+   * authMode: 'required'), a diferencia de /events que sí es anónimo. */
+  @Get('zones/:zoneId/seats')
+  @Public()
+  seatsForZone(@Param('zoneId') zoneId: string) {
+    return this.ticketsService.seatsForZone(zoneId);
   }
 
   @Patch(':id/assign')

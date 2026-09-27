@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { signTicketToken } from '@event-hub/shared-types';
 import { RawInternalHeaders } from '@event-hub/internal-auth';
+import { Prisma } from '../../generated/prisma-client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { DomainEventsPublisher } from '../messaging/domain-events.publisher';
@@ -14,9 +15,21 @@ export interface OrderPaidPayload {
   zoneId: string;
   reservationId: string;
   quantity: number;
+  /// Fase 2 (asiento individual): presente solo cuando la reserva fue por
+  /// butacas puntuales (ReservationsService.reserveSeats), no por cupo.
+  /// Mutuamente excluyente en la práctica con el conteo de `quantity`
+  /// contra la zona — ver la rama en confirmFromOrder.
+  seatIds?: string[];
 }
 
 class ZoneSoldOutError extends Error {}
+
+/** Mismo espíritu que ZoneSoldOutError pero para el otro modelo de venta:
+ * el `@unique` de Ticket.seatId es la garantía dura (ver schema.prisma),
+ * así que esto solo puede pasar si el soft hold de Redis falló en algo
+ * que debería haber prevenido — igual que ZoneSoldOutError, va a la DLQ
+ * para revisión manual (reembolso parcial), no se silencia. */
+class SeatAlreadySoldError extends Error {}
 
 @Injectable()
 export class TicketsService {
@@ -64,6 +77,42 @@ export class TicketsService {
       return { ticketId, qrToken: signTicketToken(ticketId, this.qrSecret) };
     });
 
+    if (payload.seatIds) {
+      await this.confirmSeats(eventId, payload, tickets);
+    } else {
+      await this.confirmZoneCapacity(eventId, payload, tickets);
+    }
+
+    // Best-effort — el soft hold ya cumplió su propósito (evitar
+    // sobreventa obvia durante el checkout); si esto falla, el hold
+    // simplemente expira solo por TTL.
+    const releaseHold = payload.seatIds
+      ? this.redis.releaseSeats(payload.reservationId, payload.seatIds)
+      : this.redis.release(payload.zoneId, payload.reservationId);
+    await releaseHold.catch((err) => {
+      this.logger.warn(`No se pudo liberar el soft hold ${payload.reservationId}: ${err.message}`);
+    });
+
+    // Un evento por boleto (no uno con un array) — así ningún consumidor
+    // existente (dashboard en vivo de api-gateway, notifications-service)
+    // necesita cambiar para saber "cuántos boletos hay en este mensaje".
+    for (const { ticketId } of tickets) {
+      await this.publisher.publish('ticket.issued', {
+        ticketId,
+        orderId: payload.orderId,
+        userId: payload.userId,
+        zoneId: payload.zoneId,
+      });
+    }
+  }
+
+  /** Garantía dura contra sobreventa por CUPO — ver el docstring de
+   * confirmFromOrder. Extraído sin cambios de comportamiento. */
+  private async confirmZoneCapacity(
+    eventId: string,
+    payload: OrderPaidPayload,
+    tickets: { ticketId: string; qrToken: string }[],
+  ) {
     await this.prisma.$transaction(async (tx) => {
       const zoneRows = await tx.$queryRaw<{ id: string; capacity: number }[]>`
         SELECT id, capacity FROM event_zones WHERE id = ${payload.zoneId} FOR UPDATE
@@ -102,24 +151,51 @@ export class TicketsService {
         data: { eventId, eventType: 'order.paid' },
       });
     });
+  }
 
-    // Best-effort — el soft hold ya cumplió su propósito (evitar
-    // sobreventa obvia durante el checkout); si esto falla, el hold
-    // simplemente expira solo por TTL.
-    await this.redis.release(payload.zoneId, payload.reservationId).catch((err) => {
-      this.logger.warn(`No se pudo liberar el soft hold ${payload.reservationId}: ${err.message}`);
-    });
+  /**
+   * Fase 2 (asiento individual) — garantía dura contra doble venta de UNA
+   * butaca: el `@unique` de Ticket.seatId (ver schema.prisma), no un lock
+   * de fila manual. Cada seatId se intenta insertar dentro de la MISMA
+   * transacción que las demás; si cualquiera choca contra el índice único
+   * (alguien más ya la vendió), Postgres tira P2002 y la transacción
+   * entera se revierte (ningún boleto de esta orden queda a medias) —
+   * mismo criterio "todo o nada" que confirmZoneCapacity.
+   */
+  private async confirmSeats(
+    eventId: string,
+    payload: OrderPaidPayload,
+    tickets: { ticketId: string; qrToken: string }[],
+  ) {
+    const seatIds = payload.seatIds!;
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        for (let i = 0; i < tickets.length; i++) {
+          const { ticketId, qrToken } = tickets[i];
+          await tx.ticket.create({
+            data: {
+              id: ticketId,
+              zoneId: payload.zoneId,
+              seatId: seatIds[i],
+              userId: payload.userId,
+              orderId: payload.orderId,
+              reservationId: payload.reservationId,
+              qrToken,
+            },
+          });
+        }
 
-    // Un evento por boleto (no uno con un array) — así ningún consumidor
-    // existente (dashboard en vivo de api-gateway, notifications-service)
-    // necesita cambiar para saber "cuántos boletos hay en este mensaje".
-    for (const { ticketId } of tickets) {
-      await this.publisher.publish('ticket.issued', {
-        ticketId,
-        orderId: payload.orderId,
-        userId: payload.userId,
-        zoneId: payload.zoneId,
+        await tx.processedEvent.create({
+          data: { eventId, eventType: 'order.paid' },
+        });
       });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new SeatAlreadySoldError(
+          `Una o más butacas de la orden ${payload.orderId} (zona ${payload.zoneId}) ya estaban vendidas al confirmar — requiere revisión manual`,
+        );
+      }
+      throw err;
     }
   }
 
@@ -146,6 +222,32 @@ export class TicketsService {
         zonePrice: zone?.price ?? null,
       };
     });
+  }
+
+  /**
+   * Fase 2 (asiento individual) — disponibilidad de butacas de una zona
+   * para que el comprador elija en el mapa (VenueSeatMap, mobile). Una
+   * sola consulta de qué seatIds ya tienen Ticket (sold=true) sobre el
+   * catálogo completo de la zona — sin esto el mapa no sabría qué butacas
+   * pintar como ocupadas.
+   */
+  async seatsForZone(zoneId: string) {
+    const seats = await this.prisma.seat.findMany({
+      where: { zoneId },
+      orderBy: [{ rowLabel: 'asc' }, { seatNumber: 'asc' }],
+    });
+    const soldTickets = await this.prisma.ticket.findMany({
+      where: { seatId: { in: seats.map((s) => s.id) } },
+      select: { seatId: true },
+    });
+    const soldSeatIds = new Set(soldTickets.map((t) => t.seatId));
+
+    return seats.map((seat) => ({
+      id: seat.id,
+      rowLabel: seat.rowLabel,
+      seatNumber: seat.seatNumber,
+      sold: soldSeatIds.has(seat.id),
+    }));
   }
 
   /** Boletos vendidos por zona — alimenta el dashboard del organizador
