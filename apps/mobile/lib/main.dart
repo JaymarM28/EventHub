@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:provider/provider.dart';
@@ -95,6 +96,16 @@ class EventHubApp extends StatelessWidget {
         title: 'Event Hub',
         theme: AppTheme.dark(),
         routerConfig: router,
+        // Necesario para que CupertinoDatePicker (selector de fecha de
+        // nacimiento estilo iPhone, register_screen.dart) muestre meses en
+        // español en vez del inglés por defecto de Flutter.
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        supportedLocales: const [Locale('es')],
+        locale: const Locale('es'),
       ),
     );
   }

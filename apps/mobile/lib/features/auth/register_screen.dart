@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -34,14 +35,67 @@ class _RegisterScreenState extends State<RegisterScreen> {
     super.dispose();
   }
 
+  // Selector estilo iPhone (ruedas), no el calendario de grilla de
+  // Material — pedido explícito del usuario. CupertinoDatePicker solo
+  // avisa el cambio en vivo (onDateTimeChanged); se guarda en una variable
+  // local y se aplica recién al tocar "Listo", para poder cancelar sin
+  // perder la fecha ya elegida antes de abrir el selector.
   Future<void> _pickBirthDate() async {
     final now = DateTime.now();
-    final picked = await showDatePicker(
+    var tempDate = _birthDate ?? DateTime(now.year - 18, now.month, now.day);
+    final picked = await showModalBottomSheet<DateTime>(
       context: context,
-      initialDate: _birthDate ?? DateTime(now.year - 18, now.month, now.day),
-      firstDate: DateTime(now.year - 120),
-      lastDate: now,
-      helpText: 'Fecha de nacimiento',
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          top: false,
+          child: SizedBox(
+            height: 300,
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    CupertinoButton(
+                      onPressed: () => Navigator.of(sheetContext).pop(),
+                      child: const Text('Cancelar'),
+                    ),
+                    CupertinoButton(
+                      onPressed: () =>
+                          Navigator.of(sheetContext).pop(tempDate),
+                      child: const Text('Listo'),
+                    ),
+                  ],
+                ),
+                const Divider(height: 1, color: AppColors.border),
+                Expanded(
+                  child: CupertinoTheme(
+                    data: const CupertinoThemeData(
+                      brightness: Brightness.dark,
+                      textTheme: CupertinoTextThemeData(
+                        dateTimePickerTextStyle: TextStyle(
+                          color: AppColors.ink,
+                          fontSize: 20,
+                        ),
+                      ),
+                    ),
+                    child: CupertinoDatePicker(
+                      mode: CupertinoDatePickerMode.date,
+                      initialDateTime: tempDate,
+                      minimumDate: DateTime(now.year - 120),
+                      maximumDate: now,
+                      onDateTimeChanged: (d) => tempDate = d,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
     if (picked != null) setState(() => _birthDate = picked);
   }
