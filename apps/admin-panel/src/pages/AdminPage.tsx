@@ -8,6 +8,8 @@ import { TableSkeleton } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useAuth } from '../auth/AuthContext';
+import { ImageUploadField } from '../components/ImageUploadField';
+import { uploadVenueMap } from '../api/uploads';
 
 const ALL_ROLES = ['SUPER_ADMIN', 'ORGANIZER', 'STAFF', 'VENDOR', 'ATTENDEE'] as const;
 
@@ -507,15 +509,12 @@ function VenueForm({
           />
         </div>
       </div>
-      <div>
-        <label>Imagen del mapa (opcional — plano del venue, ej. la vista del estadio)</label>
-        <input
-          type="url"
-          placeholder="https://…"
-          value={mapImageUrl}
-          onChange={(e) => setMapImageUrl(e.target.value)}
-        />
-      </div>
+      <ImageUploadField
+        label="Imagen del mapa (opcional — plano del venue, ej. la vista del estadio)"
+        value={mapImageUrl}
+        onChange={setMapImageUrl}
+        upload={uploadVenueMap}
+      />
       <div className="row">
         <button className="btn-primary" type="submit" disabled={loading}>
           {loading ? 'Guardando…' : submitLabel}

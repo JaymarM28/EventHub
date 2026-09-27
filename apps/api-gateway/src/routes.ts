@@ -47,6 +47,10 @@ export function buildRoutes(): ServiceRoute[] {
     // SUPER_ADMIN, listado también por organizadores (para elegir uno al
     // crear un evento, a futuro — ver DESIGN.md Fase de plataforma).
     { pathPrefix: '/venues', target: eventsServiceUrl, authMode: 'required' },
+    // Subida de imágenes (mapa de establecimiento, portada/galería de
+    // evento) — vive en events-service (ver storage.module.ts) porque es
+    // el único servicio que hoy necesita URLs de imagen persistentes.
+    { pathPrefix: '/uploads', target: eventsServiceUrl, authMode: 'required' },
     // Nota: POST /reservations y todo /internal/tickets/* de tickets-service
     // NO se exponen aquí a propósito — son llamadas internas service-to-
     // service (orders→tickets para reservar, Finding 1; access→tickets

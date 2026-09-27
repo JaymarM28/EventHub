@@ -9,10 +9,13 @@ import {
   type ZoneDraft,
 } from '../api/events';
 import { getVenue, listVenues, type Venue } from '../api/venues';
+import { uploadEventImage } from '../api/uploads';
 import { extractErrorMessage } from '../api/client';
 import { Skeleton } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
 import { VenueMapPreview } from '../components/VenueMapPreview';
+import { ImageUploadField } from '../components/ImageUploadField';
+import { GalleryUploadField } from '../components/GalleryUploadField';
 
 const emptyZone = (): ZoneDraft => ({ name: '', price: 0, capacity: 0 });
 
@@ -102,7 +105,7 @@ function CreateEventForm({ onCreated }: { onCreated: (event: EventItem) => void 
   const [category, setCategory] = useState<EventCategory>('MUSICA');
   const [startsAt, setStartsAt] = useState('');
   const [coverImageUrl, setCoverImageUrl] = useState('');
-  const [galleryImageUrls, setGalleryImageUrls] = useState('');
+  const [galleryImages, setGalleryImages] = useState<string[]>([]);
   const [zones, setZones] = useState<ZoneDraft[]>([emptyZone()]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -124,7 +127,11 @@ function CreateEventForm({ onCreated }: { onCreated: (event: EventItem) => void 
     }
     const full = await getVenue(id);
     setSelectedVenue(full);
-    if (venue.trim() === '') setVenue(full.name);
+    // Con un establecimiento del catálogo elegido, "Lugar" deja de ser un
+    // campo libre — se autocompleta con el nombre real del venue (antes
+    // convivían los dos campos pidiendo lo mismo, confuso: "el lugar es
+    // el mismo establecimiento").
+    setVenue(full.name);
     // Un evento nuevo con establecimiento del catálogo no debería empezar
     // con zonas ya vinculadas a secciones de OTRO establecimiento (podía
     // pasar si el organizador cambia de idea a mitad de armar el form).
@@ -150,10 +157,7 @@ function CreateEventForm({ onCreated }: { onCreated: (event: EventItem) => void 
         startsAt: new Date(startsAt).toISOString(),
         zones,
         coverImageUrl: coverImageUrl || undefined,
-        galleryImageUrls: galleryImageUrls
-          .split(',')
-          .map((url) => url.trim())
-          .filter(Boolean),
+        galleryImageUrls: galleryImages,
       });
       showToast(`${title} creado`);
       onCreated(event);
@@ -175,26 +179,35 @@ function CreateEventForm({ onCreated }: { onCreated: (event: EventItem) => void 
         <label htmlFor="description">Descripción (opcional)</label>
         <textarea id="description" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
       </div>
-      <div className="row">
-        <div style={{ flex: 1 }}>
-          <label htmlFor="venue">Lugar</label>
-          <input id="venue" value={venue} onChange={(e) => setVenue(e.target.value)} required />
-        </div>
-        <div style={{ flex: 1 }}>
-          <label htmlFor="city">Ciudad</label>
-          <input id="city" value={city} onChange={(e) => setCity(e.target.value)} required />
-        </div>
-      </div>
       <div>
         <label htmlFor="venueId">Establecimiento del catálogo (opcional — habilita mapa de secciones)</label>
         <select id="venueId" value={venueId} onChange={(e) => onSelectVenue(e.target.value)}>
-          <option value="">— Sin establecimiento del catálogo —</option>
+          <option value="">— Elegir uno del catálogo —</option>
           {(venues ?? []).map((v) => (
             <option key={v.id} value={v.id}>
               {v.name}
             </option>
           ))}
         </select>
+      </div>
+      <div className="row">
+        {selectedVenue ? (
+          <div style={{ flex: 1 }}>
+            <label>Lugar</label>
+            <p className="muted" style={{ marginTop: 6 }}>
+              {selectedVenue.name} — {selectedVenue.address}
+            </p>
+          </div>
+        ) : (
+          <div style={{ flex: 1 }}>
+            <label htmlFor="venue">Lugar</label>
+            <input id="venue" value={venue} onChange={(e) => setVenue(e.target.value)} required />
+          </div>
+        )}
+        <div style={{ flex: 1 }}>
+          <label htmlFor="city">Ciudad</label>
+          <input id="city" value={city} onChange={(e) => setCity(e.target.value)} required />
+        </div>
       </div>
       {selectedVenue?.mapImageUrl && (selectedVenue.sections?.length ?? 0) > 0 && (
         <div>
@@ -230,27 +243,8 @@ function CreateEventForm({ onCreated }: { onCreated: (event: EventItem) => void 
           />
         </div>
       </div>
-      <div className="row">
-        <div style={{ flex: 1 }}>
-          <label htmlFor="coverImageUrl">URL de portada (opcional)</label>
-          <input
-            id="coverImageUrl"
-            type="url"
-            placeholder="https://..."
-            value={coverImageUrl}
-            onChange={(e) => setCoverImageUrl(e.target.value)}
-          />
-        </div>
-        <div style={{ flex: 1 }}>
-          <label htmlFor="galleryImageUrls">Galería (URLs separadas por coma, opcional)</label>
-          <input
-            id="galleryImageUrls"
-            placeholder="https://..., https://..."
-            value={galleryImageUrls}
-            onChange={(e) => setGalleryImageUrls(e.target.value)}
-          />
-        </div>
-      </div>
+      <ImageUploadField label="Portada (opcional)" value={coverImageUrl} onChange={setCoverImageUrl} upload={uploadEventImage} />
+      <GalleryUploadField images={galleryImages} onChange={setGalleryImages} />
 
       <h3>Zonas</h3>
       {zones.map((zone, i) => (

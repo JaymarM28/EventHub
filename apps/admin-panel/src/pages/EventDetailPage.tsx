@@ -29,6 +29,9 @@ import { Skeleton, TableSkeleton } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
 import { SalesChart } from '../components/SalesChart';
 import { downloadCsv } from '../components/csv';
+import { ImageUploadField } from '../components/ImageUploadField';
+import { GalleryUploadField } from '../components/GalleryUploadField';
+import { uploadEventImage } from '../api/uploads';
 
 export function EventDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -120,7 +123,7 @@ function EventHeader({ event, onUpdated }: { event: EventItem; onUpdated: (event
   const [category, setCategory] = useState<EventCategory>(event.category ?? 'OTRO');
   const [description, setDescription] = useState(event.description ?? '');
   const [coverImageUrl, setCoverImageUrl] = useState(event.coverImageUrl ?? '');
-  const [galleryImageUrls, setGalleryImageUrls] = useState(event.galleryImageUrls.join(', '));
+  const [galleryImages, setGalleryImages] = useState<string[]>(event.galleryImageUrls);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const { showToast } = useToast();
@@ -137,10 +140,7 @@ function EventHeader({ event, onUpdated }: { event: EventItem; onUpdated: (event
         category,
         description,
         coverImageUrl: coverImageUrl || undefined,
-        galleryImageUrls: galleryImageUrls
-          .split(',')
-          .map((url) => url.trim())
-          .filter(Boolean),
+        galleryImageUrls: galleryImages,
       });
       onUpdated(updated);
       showToast('Evento actualizado');
@@ -213,27 +213,8 @@ function EventHeader({ event, onUpdated }: { event: EventItem; onUpdated: (event
         <label htmlFor="edit-description">Descripción</label>
         <textarea id="edit-description" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
       </div>
-      <div className="row">
-        <div style={{ flex: 1 }}>
-          <label htmlFor="edit-coverImageUrl">URL de portada</label>
-          <input
-            id="edit-coverImageUrl"
-            type="url"
-            placeholder="https://..."
-            value={coverImageUrl}
-            onChange={(e) => setCoverImageUrl(e.target.value)}
-          />
-        </div>
-        <div style={{ flex: 1 }}>
-          <label htmlFor="edit-galleryImageUrls">Galería (URLs separadas por coma)</label>
-          <input
-            id="edit-galleryImageUrls"
-            placeholder="https://..., https://..."
-            value={galleryImageUrls}
-            onChange={(e) => setGalleryImageUrls(e.target.value)}
-          />
-        </div>
-      </div>
+      <ImageUploadField label="Portada" value={coverImageUrl} onChange={setCoverImageUrl} upload={uploadEventImage} />
+      <GalleryUploadField images={galleryImages} onChange={setGalleryImages} />
       {error && <p className="error-text">{error}</p>}
       <div className="row">
         <button className="btn-primary" type="submit" disabled={loading}>

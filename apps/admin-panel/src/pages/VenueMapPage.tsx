@@ -23,9 +23,11 @@ export function VenueMapPage() {
   const [draftName, setDraftName] = useState('');
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [imageError, setImageError] = useState(false);
   const { showToast } = useToast();
 
   const reload = () => {
+    setImageError(false);
     getVenue(venueId).then(setVenue).catch(() => setNotFound(true));
   };
 
@@ -109,13 +111,21 @@ export function VenueMapPage() {
         <div className="section-header">
           <h2>Mapa de secciones — {venue.name}</h2>
           <p className="subtitle">
-            {venue.mapImageUrl
-              ? 'Tocá el plano para marcar los vértices de una sección (mínimo 3), después ponele nombre y guardá.'
-              : 'Este establecimiento todavía no tiene una imagen de mapa cargada — agregala editándolo desde Administración.'}
+            {!venue.mapImageUrl
+              ? 'Este establecimiento todavía no tiene una imagen de mapa cargada — agregala editándolo desde Administración.'
+              : imageError
+                ? 'La imagen del mapa no se pudo cargar (el archivo puede estar corrupto o el link roto) — subí una imagen de nuevo desde Administración.'
+                : 'Tocá el plano para marcar los vértices de una sección (mínimo 3), después ponele nombre y guardá.'}
           </p>
         </div>
 
-        {venue.mapImageUrl && (
+        {venue.mapImageUrl && imageError && (
+          <div className="empty-state" style={{ marginTop: 16 }}>
+            <p>No se pudo mostrar la imagen del mapa.</p>
+          </div>
+        )}
+
+        {venue.mapImageUrl && !imageError && (
           <div
             onClick={onImageClick}
             style={{
@@ -129,7 +139,13 @@ export function VenueMapPage() {
               overflow: 'hidden',
             }}
           >
-            <img src={venue.mapImageUrl} alt={venue.name} style={{ width: '100%', display: 'block' }} draggable={false} />
+            <img
+              src={venue.mapImageUrl}
+              alt={venue.name}
+              style={{ width: '100%', display: 'block' }}
+              draggable={false}
+              onError={() => setImageError(true)}
+            />
             <svg
               viewBox="0 0 100 100"
               preserveAspectRatio="none"

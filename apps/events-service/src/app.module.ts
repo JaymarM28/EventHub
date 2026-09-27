@@ -6,6 +6,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { MessagingModule } from './messaging/messaging.module';
 import { EventsModule } from './events/events.module';
 import { VenuesModule } from './venues/venues.module';
+import { StorageModule } from './storage/storage.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { VenuesModule } from './venues/venues.module';
     MessagingModule,
     EventsModule,
     VenuesModule,
+    StorageModule,
   ],
   providers: [
     {
