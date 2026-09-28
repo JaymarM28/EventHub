@@ -187,6 +187,18 @@ export async function updateZone(eventId: string, zoneId: string, input: UpdateZ
   return response.data;
 }
 
+export interface GenerateSeatsInput {
+  rowLabels: string[];
+  seatsPerRow: number;
+}
+
+/** Fase 2 (asiento individual) — genera el catálogo completo de butacas
+ * de una zona de una sola vez (no hay endpoint para regenerar/borrar). */
+export async function generateSeats(eventId: string, zoneId: string, input: GenerateSeatsInput): Promise<EventItem> {
+  const response = await apiClient.post<EventItem>(`/events/${eventId}/zones/${zoneId}/seats/generate`, input);
+  return response.data;
+}
+
 export async function listDiscountCodes(eventId: string): Promise<DiscountCode[]> {
   const response = await apiClient.get<DiscountCode[]>(`/events/${eventId}/discount-codes`);
   return response.data;

@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/auth_state.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/pressable_button.dart';
 import '../events/event_models.dart';
 import '../tickets/ticket_models.dart';
+import '../tickets/ticket_screen.dart';
 import '../tickets/tickets_repository.dart';
 import 'orders_repository.dart';
 import 'payment_webview_screen.dart';
@@ -22,10 +25,16 @@ const _maxQuantityPerOrder = 10;
 /// decide qué hacer con el resultado. Esto evita depender del context del
 /// sheet, que deja de existir una vez cerrado.
 class CheckoutSheet extends StatefulWidget {
-  const CheckoutSheet({super.key, required this.event, required this.zone});
+  const CheckoutSheet({super.key, required this.event, required this.zone, this.seatIds});
 
   final EventModel event;
   final ZoneModel zone;
+
+  /// Fase 2 (asiento individual) — presente cuando el comprador ya eligió
+  /// butacas puntuales en el mapa (SeatPickerScreen), no una cantidad
+  /// contra el cupo de la zona. Con esto, la cantidad queda fija (no hay
+  /// stepper) y el checkout manda `seatIds` en vez de `quantity`.
+  final List<String>? seatIds;
 
   @override
   State<CheckoutSheet> createState() => _CheckoutSheetState();
@@ -34,7 +43,7 @@ class CheckoutSheet extends StatefulWidget {
 class _CheckoutSheetState extends State<CheckoutSheet> {
   _Status _status = _Status.idle;
   String? _error;
-  int _quantity = 1;
+  late int _quantity = widget.seatIds?.length ?? 1;
   final _discountCodeController = TextEditingController();
 
   @override
@@ -61,8 +70,9 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
     final ticketsRepository = context.read<TicketsRepository>();
     try {
       final order = await ordersRepository.checkout(
-        widget.zone.id,
-        _quantity,
+        zoneId: widget.zone.id,
+        quantity: widget.seatIds == null ? _quantity : null,
+        seatIds: widget.seatIds,
         discountCode: _discountCodeController.text.trim(),
       );
       if (order.checkoutUrl == null) {
@@ -172,13 +182,19 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
           const SizedBox(height: 20),
           Row(
             children: [
-              Text('Cantidad', style: Theme.of(context).textTheme.bodyLarge),
-              const Spacer(),
-              _QuantityStepper(
-                value: _quantity,
-                max: _maxQuantity,
-                onChanged: busy ? null : (v) => setState(() => _quantity = v),
+              Text(
+                widget.seatIds != null ? 'Butacas seleccionadas' : 'Cantidad',
+                style: Theme.of(context).textTheme.bodyLarge,
               ),
+              const Spacer(),
+              if (widget.seatIds != null)
+                Text('$_quantity', style: Theme.of(context).textTheme.titleLarge)
+              else
+                _QuantityStepper(
+                  value: _quantity,
+                  max: _maxQuantity,
+                  onChanged: busy ? null : (v) => setState(() => _quantity = v),
+                ),
             ],
           ),
           const SizedBox(height: 16),
@@ -322,6 +338,7 @@ Future<List<TicketModel>?> showCheckoutSheet(
   BuildContext context, {
   required EventModel event,
   required ZoneModel zone,
+  List<String>? seatIds,
 }) {
   return showModalBottomSheet<List<TicketModel>>(
     context: context,
@@ -330,6 +347,29 @@ Future<List<TicketModel>?> showCheckoutSheet(
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
-    builder: (context) => CheckoutSheet(event: event, zone: zone),
+    builder: (context) => CheckoutSheet(event: event, zone: zone, seatIds: seatIds),
   );
+}
+
+/// Flujo completo de "comprar esta zona/estas butacas": chequeo de sesión
+/// → sheet de checkout → pantalla del boleto. Compartido entre
+/// EventDetailScreen (zona, sin seatIds) y SeatPickerScreen (Fase 2,
+/// butacas puntuales) para no duplicar el chequeo de login ni la
+/// navegación al boleto emitido.
+Future<void> buyZone(
+  BuildContext context, {
+  required EventModel event,
+  required ZoneModel zone,
+  List<String>? seatIds,
+}) async {
+  if (context.read<AuthState>().status != AuthStatus.authenticated) {
+    context.push('/login');
+    return;
+  }
+  final tickets = await showCheckoutSheet(context, event: event, zone: zone, seatIds: seatIds);
+  if (tickets != null && context.mounted) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => TicketScreen(tickets: tickets, event: event, zone: zone)),
+    );
+  }
 }

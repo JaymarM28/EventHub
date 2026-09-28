@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../checkout/seat_picker_screen.dart';
+import '../tickets/tickets_repository.dart';
 import 'event_models.dart';
 
 /// Misma paleta fija por índice que el editor del admin panel (ver
@@ -30,11 +33,13 @@ Color _colorFor(int index) => _sectionColors[index % _sectionColors.length];
 class VenueSeatMap extends StatefulWidget {
   const VenueSeatMap({
     super.key,
+    required this.event,
     required this.venueMap,
     required this.zones,
     required this.onConfirmBuy,
   });
 
+  final EventModel event;
   final VenueMapModel venueMap;
   final List<ZoneModel> zones;
 
@@ -62,6 +67,28 @@ class _VenueSeatMapState extends State<VenueSeatMap> {
       if (_sectionPath(section, size).contains(localPosition)) return section;
     }
     return null;
+  }
+
+  /// Fase 2 (asiento individual): si la zona tiene butacas generadas, el
+  /// "preview" real es elegir asiento, no confirmar la zona entera — se
+  /// salta la tarjeta de precio y se va directo al selector de butacas.
+  /// Best-effort: si la consulta falla, se cae al flujo por zona de
+  /// siempre en vez de bloquear la compra por un error de red.
+  Future<void> _handleSectionTap(ZoneModel zone) async {
+    var seats = const <SeatModel>[];
+    try {
+      seats = await context.read<TicketsRepository>().seatsForZone(zone.id);
+    } catch (_) {
+      // best-effort — ver docstring
+    }
+    if (!mounted) return;
+    if (seats.isNotEmpty) {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => SeatPickerScreen(event: widget.event, zone: zone, seats: seats)),
+      );
+      return;
+    }
+    _showZonePreview(zone);
   }
 
   void _showZonePreview(ZoneModel zone) {
@@ -135,7 +162,7 @@ class _VenueSeatMapState extends State<VenueSeatMap> {
                           setState(() => _pressedSectionId = null);
                           if (section == null) return;
                           final zone = _zoneForSection(section.id);
-                          if (zone != null) _showZonePreview(zone);
+                          if (zone != null) _handleSectionTap(zone);
                         },
                         child: CustomPaint(
                           painter: _SeatMapPainter(

@@ -15,17 +15,28 @@ class OrdersRepository {
 
   final ApiClient _apiClient;
 
-  Future<OrderModel> checkout(
-    String zoneId,
-    int quantity, {
+  /// Fase 2 (asiento individual): `quantity` y `seatIds` son mutuamente
+  /// excluyentes, igual que en el backend (CreateOrderDto) — exactamente
+  /// uno de los dos debe venir. Con `seatIds`, se compran ESAS butacas
+  /// puntuales; con `quantity`, N boletos "por cupo" de la zona (como
+  /// siempre funcionó).
+  Future<OrderModel> checkout({
+    required String zoneId,
+    int? quantity,
+    List<String>? seatIds,
     String? discountCode,
   }) async {
+    assert(
+      (quantity == null) != (seatIds == null),
+      'checkout necesita exactamente uno de quantity o seatIds',
+    );
     try {
       final response = await _apiClient.dio.post(
         '/orders/checkout',
         data: {
           'zoneId': zoneId,
-          'quantity': quantity,
+          if (quantity != null) 'quantity': quantity,
+          if (seatIds != null) 'seatIds': seatIds,
           if (discountCode != null && discountCode.isNotEmpty)
             'discountCode': discountCode,
         },

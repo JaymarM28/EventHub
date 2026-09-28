@@ -5,6 +5,7 @@ import {
   addZone,
   createDiscountCode,
   findEvent,
+  generateSeats,
   getDashboard,
   listDiscountCodes,
   listStaff,
@@ -243,6 +244,7 @@ function DashboardSection({
 }) {
   const [editingZoneId, setEditingZoneId] = useState<string | null>(null);
   const [showAddZone, setShowAddZone] = useState(false);
+  const [generatingSeatsZoneId, setGeneratingSeatsZoneId] = useState<string | null>(null);
 
   const exportZonesCsv = () => {
     if (!dashboard) return;
@@ -335,13 +337,35 @@ function DashboardSection({
                     <td>{zone.capacity}</td>
                     <td>{formatMoney(zone.revenue)}</td>
                     <td>
-                      <button className="btn-ghost" onClick={() => setEditingZoneId(zone.zoneId)}>
-                        Editar
-                      </button>
+                      <div className="row" style={{ gap: 8 }}>
+                        <button className="btn-ghost" onClick={() => setEditingZoneId(zone.zoneId)}>
+                          Editar
+                        </button>
+                        <button
+                          className="btn-ghost"
+                          onClick={() =>
+                            setGeneratingSeatsZoneId((prev) => (prev === zone.zoneId ? null : zone.zoneId))
+                          }
+                        >
+                          Generar butacas
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ),
               )}
+              {generatingSeatsZoneId &&
+                dashboard.zones.some((z) => z.zoneId === generatingSeatsZoneId) && (
+                  <GenerateSeatsRow
+                    eventId={eventId}
+                    zoneId={generatingSeatsZoneId}
+                    onDone={() => {
+                      setGeneratingSeatsZoneId(null);
+                      onZonesChanged();
+                    }}
+                    onCancel={() => setGeneratingSeatsZoneId(null)}
+                  />
+                )}
             </tbody>
           </table>
 
@@ -534,6 +558,81 @@ function AddZoneForm({
       </div>
       {error && <p className="error-text">{error}</p>}
     </form>
+  );
+}
+
+/** Fase 2 (asiento individual) — genera el catálogo completo de butacas
+ * de una zona de una sola vez (filas × asientos por fila). Sin
+ * regenerar/borrar a propósito, mismo criterio que el backend: si la
+ * zona ya tiene butacas, el submit devuelve el error del backend tal
+ * cual (mensaje ya claro: "ya tiene butacas generadas"). */
+function GenerateSeatsRow({
+  eventId,
+  zoneId,
+  onDone,
+  onCancel,
+}: {
+  eventId: string;
+  zoneId: string;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [rows, setRows] = useState('A,B,C');
+  const [seatsPerRow, setSeatsPerRow] = useState(10);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const { showToast } = useToast();
+
+  const onSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    const rowLabels = rows
+      .split(',')
+      .map((r) => r.trim())
+      .filter(Boolean);
+    if (rowLabels.length === 0) {
+      setError('Ingresá al menos una fila (ej. A,B,C)');
+      return;
+    }
+    setLoading(true);
+    try {
+      await generateSeats(eventId, zoneId, { rowLabels, seatsPerRow });
+      showToast(`${rowLabels.length * seatsPerRow} butacas generadas`);
+      onDone();
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <tr>
+      <td colSpan={6}>
+        <form className="row" onSubmit={onSubmit} style={{ padding: '8px 0', alignItems: 'flex-end' }}>
+          <div style={{ flex: 2 }}>
+            <label>Filas (separadas por coma)</label>
+            <input value={rows} onChange={(e) => setRows(e.target.value)} placeholder="A,B,C" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label>Asientos por fila</label>
+            <input
+              type="number"
+              min={1}
+              value={seatsPerRow}
+              onChange={(e) => setSeatsPerRow(Number(e.target.value))}
+            />
+          </div>
+          <button className="btn-primary" type="submit" disabled={loading}>
+            {loading ? 'Generando…' : 'Generar'}
+          </button>
+          <button className="btn-ghost" type="button" onClick={onCancel}>
+            Cancelar
+          </button>
+        </form>
+        {error && <p className="error-text">{error}</p>}
+      </td>
+    </tr>
   );
 }
 

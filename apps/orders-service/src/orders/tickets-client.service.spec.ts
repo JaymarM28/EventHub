@@ -31,6 +31,18 @@ describe('TicketsClientService', () => {
     expect(result.reservationId).toBe('res-1');
   });
 
+  it('Fase 2: con un array de seatIds, manda {zoneId, seatIds} en vez de {zoneId, quantity}', async () => {
+    http.post.mockReturnValue(of({ data: { reservationId: 'res-1', zoneId: 'z1', price: 50, expiresAt: 1 } }));
+
+    await service.reserve('z1', ['seat-1', 'seat-2'], { 'x-internal-context': 'p', 'x-internal-signature': 's' });
+
+    expect(http.post).toHaveBeenCalledWith(
+      'http://localhost:3003/reservations',
+      { zoneId: 'z1', seatIds: ['seat-1', 'seat-2'] },
+      { headers: { 'x-internal-context': 'p', 'x-internal-signature': 's' } },
+    );
+  });
+
   it('traduce un 409 de tickets-service a un HttpException con el mismo status y mensaje (no un 500 genérico)', async () => {
     http.post.mockReturnValue(
       throwError(() => ({

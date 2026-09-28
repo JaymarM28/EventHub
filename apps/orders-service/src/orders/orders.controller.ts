@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Query, Res } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, Param, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { InternalHeaders, InternalUser, InternalUserContext, Public, RawInternalHeaders } from '@event-hub/internal-auth';
 import { OrdersService } from './orders.service';
@@ -24,7 +24,20 @@ export class OrdersController {
     @InternalUser() user: InternalUserContext,
     @InternalHeaders() headers: RawInternalHeaders,
   ) {
-    return this.ordersService.checkout(dto.zoneId, dto.quantity, user.userId, user.email, headers, dto.discountCode);
+    if (dto.seatIds !== undefined && dto.quantity !== undefined) {
+      throw new BadRequestException('Enviá quantity o seatIds, no ambos');
+    }
+    if (dto.seatIds === undefined && dto.quantity === undefined) {
+      throw new BadRequestException('Falta quantity o seatIds');
+    }
+    return this.ordersService.checkout(
+      dto.zoneId,
+      dto.seatIds ?? dto.quantity!,
+      user.userId,
+      user.email,
+      headers,
+      dto.discountCode,
+    );
   }
 
   @Get('mine')

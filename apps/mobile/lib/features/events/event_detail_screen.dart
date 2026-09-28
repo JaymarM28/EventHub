@@ -1,16 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../core/auth_state.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/skeleton.dart';
 import '../checkout/checkout_sheet.dart';
-import '../tickets/ticket_screen.dart';
 import 'event_list_screen.dart' show categoryIcon;
 import 'event_models.dart';
 import 'favorite_button.dart';
@@ -33,26 +30,6 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
   void initState() {
     super.initState();
     _future = context.read<EventsRepository>().findOne(widget.eventId);
-  }
-
-  Future<void> _onZoneTap(
-    BuildContext context,
-    EventModel event,
-    ZoneModel zone,
-  ) async {
-    if (context.read<AuthState>().status != AuthStatus.authenticated) {
-      context.push('/login');
-      return;
-    }
-    final tickets = await showCheckoutSheet(context, event: event, zone: zone);
-    if (tickets != null && context.mounted) {
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) =>
-              TicketScreen(tickets: tickets, event: event, zone: zone),
-        ),
-      );
-    }
   }
 
   @override
@@ -276,9 +253,10 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
                       ),
                       const SizedBox(height: 10),
                       VenueSeatMap(
+                        event: event,
                         venueMap: event.venueMap!,
                         zones: event.zones,
-                        onConfirmBuy: (zone) => _onZoneTap(context, event, zone),
+                        onConfirmBuy: (zone) => buyZone(context, event: event, zone: zone),
                       ),
                       const SizedBox(height: 16),
                     ],
@@ -287,7 +265,7 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
                         padding: const EdgeInsets.only(bottom: 10),
                         child: _ZoneTile(
                           zone: zone,
-                          onTap: () => _onZoneTap(context, event, zone),
+                          onTap: () => buyZone(context, event: event, zone: zone),
                         ),
                       ),
                     ),

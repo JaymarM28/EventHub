@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 
 import '../../core/api_client.dart';
+import '../events/event_models.dart';
 import 'ticket_models.dart';
 
 /// La emisión del boleto es asíncrona (order.paid -> outbox -> RabbitMQ ->
@@ -31,6 +32,16 @@ class TicketsRepository {
     final response = await _apiClient.dio.get('/tickets/mine');
     return (response.data as List<dynamic>)
         .map((t) => TicketModel.fromJson(t as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Fase 2 (asiento individual) — devuelve [] tanto si la zona no tiene
+  /// butacas generadas como si tiene y están todas disponibles; el
+  /// caller (SeatPickerScreen) decide qué hacer con una lista vacía.
+  Future<List<SeatModel>> seatsForZone(String zoneId) async {
+    final response = await _apiClient.dio.get('/tickets/zones/$zoneId/seats');
+    return (response.data as List<dynamic>)
+        .map((s) => SeatModel.fromJson(s as Map<String, dynamic>))
         .toList();
   }
 

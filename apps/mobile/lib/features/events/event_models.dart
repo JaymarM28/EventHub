@@ -175,3 +175,29 @@ class EventModel {
     );
   }
 }
+
+/// Fase 2 (asiento individual) — una butaca de una zona, con su
+/// disponibilidad ya resuelta por tickets-service (GET
+/// /tickets/zones/:zoneId/seats) — el cliente nunca calcula esto solo.
+class SeatModel {
+  SeatModel({
+    required this.id,
+    required this.rowLabel,
+    required this.seatNumber,
+    required this.sold,
+  });
+
+  final String id;
+  final String rowLabel;
+  final int seatNumber;
+  final bool sold;
+
+  factory SeatModel.fromJson(Map<String, dynamic> json) {
+    return SeatModel(
+      id: json['id'] as String,
+      rowLabel: json['rowLabel'] as String,
+      seatNumber: json['seatNumber'] as int,
+      sold: json['sold'] as bool,
+    );
+  }
+}

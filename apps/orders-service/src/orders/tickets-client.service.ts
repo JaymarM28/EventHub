@@ -12,6 +12,9 @@ export interface ReservationResult {
   quantity: number;
   price: number; // precio UNITARIO — el caller multiplica por quantity
   currency: string; // Fase D (#20) — moneda del evento, viaja hasta acá desde events-service
+  /// Fase 2 (asiento individual) — presente solo cuando la reserva fue por
+  /// butacas puntuales, ver ReservationsService.reserveSeats en tickets-service.
+  seatIds?: string[];
 }
 
 /**
@@ -32,14 +35,17 @@ export class TicketsClientService {
     this.baseUrl = config.getOrThrow<string>('TICKETS_SERVICE_URL');
   }
 
-  async reserve(zoneId: string, quantity: number, headers: RawInternalHeaders): Promise<ReservationResult> {
+  async reserve(
+    zoneId: string,
+    quantityOrSeatIds: number | string[],
+    headers: RawInternalHeaders,
+  ): Promise<ReservationResult> {
+    const body = Array.isArray(quantityOrSeatIds)
+      ? { zoneId, seatIds: quantityOrSeatIds }
+      : { zoneId, quantity: quantityOrSeatIds };
     try {
       const response = await firstValueFrom(
-        this.http.post<ReservationResult>(
-          `${this.baseUrl}/reservations`,
-          { zoneId, quantity },
-          { headers },
-        ),
+        this.http.post<ReservationResult>(`${this.baseUrl}/reservations`, body, { headers }),
       );
       return response.data;
     } catch (err) {

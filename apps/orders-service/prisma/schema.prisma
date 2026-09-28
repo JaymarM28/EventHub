@@ -20,6 +20,11 @@ model Order {
   zoneId        String
   reservationId String
   quantity      Int         @default(1) // Fase A: varios boletos por orden
+  /// Fase 2 (asiento individual): butacas puntuales de esta orden — vacío
+  /// para órdenes "por cupo" (como siempre funcionó). `quantity` sigue
+  /// siendo la cantidad real de boletos en ambos casos (== seatIds.length
+  /// cuando no está vacío), no se duplica esa info en otro campo.
+  seatIds       String[]    @default([])
   amount        Decimal     @db.Decimal(10, 2) // TOTAL (precio unitario × quantity), no unitario
   /// Fase D (#20): moneda del evento en el momento de la compra — viaja
   /// desde events-service vía la reserva (ver TicketsClientService).

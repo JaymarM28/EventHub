@@ -35,16 +35,17 @@ export class OrdersService {
 
   async checkout(
     zoneId: string,
-    quantity: number,
+    quantityOrSeatIds: number | string[],
     userId: string,
     userEmail: string,
     headers: RawInternalHeaders,
     discountCode?: string,
   ) {
     // 1. Reserva síncrona en tickets-service (Finding 1) — falla rápido si
-    //    la zona no tiene `quantity` cupos, antes de crear cualquier
-    //    registro de orden.
-    const reservation = await this.ticketsClient.reserve(zoneId, quantity, headers);
+    //    la zona no tiene cupos/butacas disponibles, antes de crear
+    //    cualquier registro de orden. Fase 2: `quantityOrSeatIds` puede ser
+    //    un array de butacas puntuales en vez de una cantidad contra cupo.
+    const reservation = await this.ticketsClient.reserve(zoneId, quantityOrSeatIds, headers);
     // reservation.price es UNITARIO — el monto de la orden es el total.
     const subtotal = reservation.price * reservation.quantity;
 
@@ -78,6 +79,7 @@ export class OrdersService {
         zoneId: reservation.zoneId,
         reservationId: reservation.reservationId,
         quantity: reservation.quantity,
+        ...(reservation.seatIds && { seatIds: reservation.seatIds }),
         amount: totalAmount,
         currency: reservation.currency,
         ...(appliedCode && { discountCode: appliedCode, discountAmount }),
@@ -137,7 +139,14 @@ export class OrdersService {
   }
 
   private async markPaid(
-    order: { id: string; userId: string; zoneId: string; reservationId: string; quantity: number },
+    order: {
+      id: string;
+      userId: string;
+      zoneId: string;
+      reservationId: string;
+      quantity: number;
+      seatIds?: string[];
+    },
     wompiTransactionId: string,
   ): Promise<void> {
     const eventId = randomUUID();
@@ -156,6 +165,7 @@ export class OrdersService {
             zoneId: order.zoneId,
             reservationId: order.reservationId,
             quantity: order.quantity,
+            ...(order.seatIds && order.seatIds.length > 0 && { seatIds: order.seatIds }),
           },
         },
       }),

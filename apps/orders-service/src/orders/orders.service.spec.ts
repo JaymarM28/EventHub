@@ -111,6 +111,19 @@ describe('OrdersService', () => {
       expect(prisma.order.create).not.toHaveBeenCalled();
     });
 
+    it('Fase 2 (asiento individual): reserva por seatIds y guarda las butacas en la orden', async () => {
+      ticketsClient.reserve.mockResolvedValue({ ...reservation, quantity: 2, seatIds: ['seat-1', 'seat-2'] });
+
+      await service.checkout('zone-1', ['seat-1', 'seat-2'], 'user-1', 'user1@example.com', headers);
+
+      expect(ticketsClient.reserve).toHaveBeenCalledWith('zone-1', ['seat-1', 'seat-2'], headers);
+      expect(prisma.order.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ quantity: 2, seatIds: ['seat-1', 'seat-2'], amount: 100 }),
+        }),
+      );
+    });
+
     it('#23: código de PORCENTAJE — descuenta sobre el subtotal y guarda el código aplicado', async () => {
       eventsClient.redeemDiscountCode.mockResolvedValue({ type: 'PERCENTAGE', value: '20', zonePrice: '50' });
 
@@ -188,6 +201,21 @@ describe('OrdersService', () => {
           data: expect.objectContaining({
             type: 'order.paid',
             payload: expect.objectContaining({ orderId: 'order-1', reservationId: 'res-1' }),
+          }),
+        }),
+      );
+    });
+
+    it('Fase 2: transacción aprobada con seatIds en la orden — se incluyen en el payload de order.paid', async () => {
+      wompi.getTransaction.mockResolvedValue({ id: 'tx-1', status: 'APPROVED', reference: 'order-1' });
+      prisma.order.findUnique.mockResolvedValue({ ...order, quantity: 2, seatIds: ['seat-1', 'seat-2'] });
+
+      await service.handleWompiWebhook(validEvent);
+
+      expect(prisma.outboxEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            payload: expect.objectContaining({ seatIds: ['seat-1', 'seat-2'] }),
           }),
         }),
       );
