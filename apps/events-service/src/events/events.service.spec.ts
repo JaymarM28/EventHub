@@ -313,6 +313,57 @@ describe('EventsService', () => {
     });
   });
 
+  describe('cancel', () => {
+    it('cancela el evento y publica event.cancelled con las zoneIds', async () => {
+      prisma.event.findUnique.mockResolvedValue({
+        id: 'ev-1',
+        organizerId: organizer.userId,
+        cancelledAt: null,
+        zones: [{ id: 'zone-1' }, { id: 'zone-2' }],
+      });
+      prisma.event.update.mockResolvedValue({
+        id: 'ev-1',
+        organizerId: organizer.userId,
+        zones: [{ id: 'zone-1' }, { id: 'zone-2' }],
+      });
+
+      await service.cancel('ev-1', organizer);
+
+      expect(prisma.event.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'ev-1' }, data: expect.objectContaining({ cancelledAt: expect.any(Date) }) }),
+      );
+      expect(publisher.publish).toHaveBeenCalledWith('event.cancelled', {
+        id: 'ev-1',
+        organizerId: organizer.userId,
+        zoneIds: ['zone-1', 'zone-2'],
+      });
+    });
+
+    it('rechaza cancelar un evento ya cancelado', async () => {
+      prisma.event.findUnique.mockResolvedValue({
+        id: 'ev-1',
+        organizerId: organizer.userId,
+        cancelledAt: new Date(),
+        zones: [],
+      });
+
+      await expect(service.cancel('ev-1', organizer)).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.event.update).not.toHaveBeenCalled();
+    });
+
+    it('rechaza a quien no es dueño del evento', async () => {
+      prisma.event.findUnique.mockResolvedValue({
+        id: 'ev-1',
+        organizerId: organizer.userId,
+        cancelledAt: null,
+        zones: [],
+      });
+
+      await expect(service.cancel('ev-1', otherOrganizer)).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.event.update).not.toHaveBeenCalled();
+    });
+  });
+
   describe('addStaff', () => {
     const staffDto = {
       email: 'staff@b.com',

@@ -14,6 +14,24 @@ export interface WompiTransaction {
   currency: string;
 }
 
+/// PENDING confirmado en vivo contra el sandbox real de Wompi — la
+/// documentación pública no lo lista, pero el sandbox lo devuelve en la
+/// práctica (mismo criterio que el status del pago original: async).
+export type WompiRefundStatus = 'APPROVED' | 'PENDING' | 'DECLINED' | 'ERROR' | 'CANCELLED';
+
+export interface WompiRefund {
+  /// Verificado en vivo contra el sandbox: Wompi devuelve esto como
+  /// NÚMERO, no string (a diferencia de `WompiTransaction.id`) — casteado
+  /// a string al guardar (Order.wompiRefundId es String en el schema).
+  id: number;
+  status: WompiRefundStatus;
+  amount_in_cents: number;
+}
+
+/** #22 — Wompi rechaza la llave PÚBLICA para reembolsos (a diferencia de
+ * `getTransaction`, que sí acepta la pública); ver docs Refunds V2. */
+export class RefundDeclinedError extends Error {}
+
 interface WompiEventBody {
   data?: { transaction?: { id?: string; status?: string; reference?: string } };
   signature?: { properties?: string[]; checksum?: string };
@@ -37,6 +55,7 @@ interface WompiEventBody {
 export class WompiClientService {
   private readonly logger = new Logger(WompiClientService.name);
   private readonly publicKey: string;
+  private readonly privateKey: string;
   private readonly integritySecret: string;
   readonly eventsSecret: string;
   private readonly apiBaseUrl: string;
@@ -47,6 +66,7 @@ export class WompiClientService {
     config: ConfigService,
   ) {
     this.publicKey = config.getOrThrow<string>('WOMPI_PUBLIC_KEY');
+    this.privateKey = config.getOrThrow<string>('WOMPI_PRIVATE_KEY');
     this.integritySecret = config.getOrThrow<string>('WOMPI_INTEGRITY_SECRET');
     this.eventsSecret = config.getOrThrow<string>('WOMPI_EVENTS_SECRET');
     // Sandbox y producción son la MISMA API, solo cambia la base URL (ver
@@ -105,6 +125,24 @@ export class WompiClientService {
    * (dot-paths dentro de `data`, en orden) + `timestamp` + el secreto de
    * eventos, SHA-256, comparar con `signature.checksum`.
    */
+  /**
+   * #22 — API de Refunds V2 de Wompi: `POST /v1/refunds` con la llave
+   * PRIVADA (no la pública que usa `getTransaction`/el checkout), monto
+   * exacto en centavos. Respuesta síncrona (HTTP 201) con el status ya
+   * resuelto — a diferencia de `getTransaction` (pago original), acá no
+   * hace falta un webhook aparte para saber el resultado.
+   */
+  async refundTransaction(transactionId: string, amountInCents: number, reason: string): Promise<WompiRefund> {
+    const response = await firstValueFrom(
+      this.http.post<{ data: WompiRefund }>(
+        `${this.apiBaseUrl}/refunds`,
+        { transaction_id: transactionId, amount_in_cents: amountInCents, reason },
+        { headers: { Authorization: `Bearer ${this.privateKey}` } },
+      ),
+    );
+    return response.data.data;
+  }
+
   verifyEventChecksum(body: WompiEventBody): boolean {
     const { signature, timestamp, data } = body;
     if (!signature?.properties?.length || !signature.checksum || timestamp === undefined) {

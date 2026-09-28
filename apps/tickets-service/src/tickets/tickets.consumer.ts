@@ -27,4 +27,25 @@ export class TicketsConsumer {
       channel.nack(message, false, false); // sin requeue -> DLQ
     }
   }
+
+  /** #22 — anula los boletos de una orden reembolsada (orders-service, ver
+   * OrdersService.performRefund). */
+  @EventPattern(EVENT_TYPES.ORDER_REFUNDED)
+  async handleOrderRefunded(
+    @Payload() envelope: EventEnvelope<{ orderId: string }>,
+    @Ctx() context: RmqContext,
+  ) {
+    const channel = context.getChannelRef();
+    const message = context.getMessage();
+
+    try {
+      await this.ticketsService.refundByOrder(envelope.payload.orderId);
+      channel.ack(message);
+    } catch (err) {
+      this.logger.error(
+        `Fallo procesando order.refunded (eventId=${envelope.eventId}, orderId=${envelope.payload.orderId}): ${(err as Error).message}`,
+      );
+      channel.nack(message, false, false);
+    }
+  }
 }

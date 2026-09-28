@@ -74,6 +74,11 @@ model Event {
   zones       Zone[]
   staff       EventStaff[]
   discountCodes DiscountCode[]
+  /// #22 — cuándo se canceló (null = evento activo). Sin un enum de status
+  /// separado a propósito: "cancelado" es el único estado excepcional que
+  /// existe hoy, y un timestamp nullable ya responde "¿está cancelado?" Y
+  /// "¿desde cuándo?" sin una migración de datos para los eventos viejos.
+  cancelledAt DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

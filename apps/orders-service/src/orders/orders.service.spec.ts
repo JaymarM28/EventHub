@@ -1,5 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { InternalUserContext } from '@event-hub/internal-auth';
 import { OrdersService } from './orders.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TicketsClientService } from './tickets-client.service';
@@ -9,13 +11,18 @@ import { EventsClientService } from './events-client.service';
 describe('OrdersService', () => {
   let service: OrdersService;
   let prisma: {
-    order: { create: jest.Mock; update: jest.Mock; findUnique: jest.Mock };
+    order: { create: jest.Mock; update: jest.Mock; findUnique: jest.Mock; findMany: jest.Mock };
     outboxEvent: { create: jest.Mock };
     $transaction: jest.Mock;
   };
   let ticketsClient: { reserve: jest.Mock; release: jest.Mock };
-  let wompi: { buildCheckoutUrl: jest.Mock; getTransaction: jest.Mock; verifyEventChecksum: jest.Mock };
-  let eventsClient: { redeemDiscountCode: jest.Mock };
+  let wompi: {
+    buildCheckoutUrl: jest.Mock;
+    getTransaction: jest.Mock;
+    verifyEventChecksum: jest.Mock;
+    refundTransaction: jest.Mock;
+  };
+  let eventsClient: { redeemDiscountCode: jest.Mock; getZoneOwner: jest.Mock };
 
   const headers = { 'x-internal-context': 'p', 'x-internal-signature': 's' };
   const reservation = {
@@ -38,6 +45,7 @@ describe('OrdersService', () => {
         create: jest.fn().mockResolvedValue({ id: 'order-1', status: 'PENDING', userId: 'user-1' }),
         update: jest.fn().mockResolvedValue({ id: 'order-1', status: 'PENDING', userId: 'user-1' }),
         findUnique: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
       },
       outboxEvent: { create: jest.fn().mockResolvedValue({}) },
       $transaction: jest.fn(async (ops) => Promise.all(ops)),
@@ -50,8 +58,9 @@ describe('OrdersService', () => {
       buildCheckoutUrl: jest.fn().mockReturnValue('https://checkout.wompi.co/p/?ref=order-1'),
       getTransaction: jest.fn(),
       verifyEventChecksum: jest.fn().mockReturnValue(true),
+      refundTransaction: jest.fn(),
     };
-    eventsClient = { redeemDiscountCode: jest.fn() };
+    eventsClient = { redeemDiscountCode: jest.fn(), getZoneOwner: jest.fn() };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -262,6 +271,142 @@ describe('OrdersService', () => {
       await service.handleWompiWebhook({ ...validEvent, data: {} });
 
       expect(wompi.getTransaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('refund (#22)', () => {
+    const paidOrder = {
+      id: 'order-1',
+      userId: 'user-1',
+      zoneId: 'zone-1',
+      quantity: 1,
+      seatIds: [] as string[],
+      amount: '50000',
+      status: 'PAID',
+      wompiTransactionId: 'tx-1',
+    };
+    const requester: InternalUserContext = {
+      userId: 'organizer-1',
+      email: 'o@example.com',
+      roles: ['ORGANIZER'],
+      validatedAt: Date.now(),
+    };
+    const otherOrganizer: InternalUserContext = { ...requester, userId: 'organizer-2' };
+    const superAdmin: InternalUserContext = { ...requester, userId: 'admin-1', roles: ['SUPER_ADMIN'] };
+
+    it('reembolsa una orden PAID cuando el requester es el dueño del evento', async () => {
+      prisma.order.findUnique.mockResolvedValue(paidOrder);
+      eventsClient.getZoneOwner.mockResolvedValue({ eventId: 'ev-1', organizerId: 'organizer-1' });
+      wompi.refundTransaction.mockResolvedValue({ id: 30677, status: 'APPROVED', amount_in_cents: 5000000 });
+
+      await service.refund('order-1', requester, headers);
+
+      expect(wompi.refundTransaction).toHaveBeenCalledWith('tx-1', 5000000, expect.any(String));
+      expect(prisma.order.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'order-1' },
+          data: expect.objectContaining({ status: 'REFUNDED', wompiRefundId: '30677' }),
+        }),
+      );
+      expect(prisma.outboxEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            type: 'order.refunded',
+            payload: expect.objectContaining({ orderId: 'order-1', zoneId: 'zone-1', quantity: 1 }),
+          }),
+        }),
+      );
+    });
+
+    it('permite a un SUPER_ADMIN reembolsar aunque no sea el organizador', async () => {
+      prisma.order.findUnique.mockResolvedValue(paidOrder);
+      eventsClient.getZoneOwner.mockResolvedValue({ eventId: 'ev-1', organizerId: 'organizer-1' });
+      wompi.refundTransaction.mockResolvedValue({ id: 30677, status: 'APPROVED', amount_in_cents: 5000000 });
+
+      await expect(service.refund('order-1', superAdmin, headers)).resolves.toBeUndefined();
+    });
+
+    it('rechaza a un organizador que no es dueño del evento', async () => {
+      prisma.order.findUnique.mockResolvedValue(paidOrder);
+      eventsClient.getZoneOwner.mockResolvedValue({ eventId: 'ev-1', organizerId: 'organizer-1' });
+
+      await expect(service.refund('order-1', otherOrganizer, headers)).rejects.toBeInstanceOf(ForbiddenException);
+      expect(wompi.refundTransaction).not.toHaveBeenCalled();
+    });
+
+    it('rechaza reembolsar una orden que no existe', async () => {
+      prisma.order.findUnique.mockResolvedValue(null);
+
+      await expect(service.refund('no-existe', requester, headers)).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('rechaza reembolsar una orden que no está PAID', async () => {
+      prisma.order.findUnique.mockResolvedValue({ ...paidOrder, status: 'PENDING' });
+
+      await expect(service.refund('order-1', requester, headers)).rejects.toBeInstanceOf(BadRequestException);
+      expect(eventsClient.getZoneOwner).not.toHaveBeenCalled();
+    });
+
+    it('acepta un reembolso PENDING (verificado contra el sandbox real de Wompi) como éxito operativo', async () => {
+      prisma.order.findUnique.mockResolvedValue(paidOrder);
+      eventsClient.getZoneOwner.mockResolvedValue({ eventId: 'ev-1', organizerId: 'organizer-1' });
+      wompi.refundTransaction.mockResolvedValue({ id: 30677, status: 'PENDING', amount_in_cents: 5000000 });
+
+      await service.refund('order-1', requester, headers);
+
+      expect(prisma.order.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: 'REFUNDED' }) }),
+      );
+    });
+
+    it('rechaza y no marca REFUNDED si Wompi no aprueba el reembolso', async () => {
+      prisma.order.findUnique.mockResolvedValue(paidOrder);
+      eventsClient.getZoneOwner.mockResolvedValue({ eventId: 'ev-1', organizerId: 'organizer-1' });
+      wompi.refundTransaction.mockResolvedValue({ id: 30677, status: 'DECLINED', amount_in_cents: 5000000 });
+
+      await expect(service.refund('order-1', requester, headers)).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.order.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('refundAllForZones (#22 — cancelación de evento)', () => {
+    it('reembolsa todas las órdenes PAID de las zonas dadas', async () => {
+      prisma.order.findMany.mockResolvedValue([
+        { id: 'order-1', userId: 'u1', zoneId: 'zone-1', quantity: 1, seatIds: [], amount: '50000', wompiTransactionId: 'tx-1' },
+        { id: 'order-2', userId: 'u2', zoneId: 'zone-2', quantity: 2, seatIds: [], amount: '100000', wompiTransactionId: 'tx-2' },
+      ]);
+      wompi.refundTransaction.mockResolvedValue({ id: 30679, status: 'APPROVED', amount_in_cents: 0 });
+
+      await service.refundAllForZones(['zone-1', 'zone-2']);
+
+      expect(prisma.order.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { zoneId: { in: ['zone-1', 'zone-2'] }, status: 'PAID' } }),
+      );
+      expect(wompi.refundTransaction).toHaveBeenCalledTimes(2);
+      expect(prisma.order.update).toHaveBeenCalledTimes(2);
+    });
+
+    it('una orden que falla no frena el reembolso de las demás', async () => {
+      prisma.order.findMany.mockResolvedValue([
+        { id: 'order-1', userId: 'u1', zoneId: 'zone-1', quantity: 1, seatIds: [], amount: '50000', wompiTransactionId: 'tx-1' },
+        { id: 'order-2', userId: 'u2', zoneId: 'zone-1', quantity: 1, seatIds: [], amount: '30000', wompiTransactionId: 'tx-2' },
+      ]);
+      wompi.refundTransaction
+        .mockRejectedValueOnce(new Error('Wompi caído'))
+        .mockResolvedValueOnce({ id: 30678, status: 'APPROVED', amount_in_cents: 3000000 });
+
+      await service.refundAllForZones(['zone-1']);
+
+      expect(prisma.order.update).toHaveBeenCalledTimes(1);
+      expect(prisma.order.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'order-2' } }),
+      );
+    });
+
+    it('no hace nada si no hay zoneIds', async () => {
+      await service.refundAllForZones([]);
+
+      expect(prisma.order.findMany).not.toHaveBeenCalled();
     });
   });
 });

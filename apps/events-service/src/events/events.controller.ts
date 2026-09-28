@@ -69,6 +69,12 @@ export class EventsController {
     return this.eventsService.update(id, dto, user);
   }
 
+  @Post(':id/cancel')
+  @Roles('ORGANIZER', 'SUPER_ADMIN')
+  cancel(@Param('id') id: string, @InternalUser() user: InternalUserContext) {
+    return this.eventsService.cancel(id, user);
+  }
+
   @Post(':id/staff')
   @Roles('ORGANIZER', 'SUPER_ADMIN')
   addStaff(

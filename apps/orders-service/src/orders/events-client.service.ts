@@ -11,6 +11,11 @@ export interface RedeemedDiscount {
   zonePrice: string;
 }
 
+export interface ZoneOwner {
+  eventId: string;
+  organizerId: string;
+}
+
 /**
  * Llamada SÍNCRONA a events-service durante el checkout (#23) — mismo
  * patrón que TicketsClientService: reenvía el MISMO header interno que
@@ -31,6 +36,19 @@ export class EventsClientService {
     try {
       const response = await firstValueFrom(
         this.http.post<RedeemedDiscount>(`${this.baseUrl}/internal/zones/${zoneId}/redeem-discount`, { code }, { headers }),
+      );
+      return response.data;
+    } catch (err) {
+      throw this.toHttpException(err);
+    }
+  }
+
+  /** #22 — quién puede reembolsar esta orden: el dueño del evento al que
+   * pertenece su zona (o SUPER_ADMIN, chequeado por el caller). */
+  async getZoneOwner(zoneId: string, headers: RawInternalHeaders): Promise<ZoneOwner> {
+    try {
+      const response = await firstValueFrom(
+        this.http.get<ZoneOwner>(`${this.baseUrl}/internal/zones/${zoneId}`, { headers }),
       );
       return response.data;
     } catch (err) {

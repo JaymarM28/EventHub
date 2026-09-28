@@ -39,6 +39,8 @@ export interface EventItem {
   /** Geocodificadas automáticamente por el backend (DESIGN.md #18) — no se editan desde el panel. */
   latitude: number | null;
   longitude: number | null;
+  /** #22 — null = evento activo. Sin "descancelar" en esta versión. */
+  cancelledAt: string | null;
 }
 
 export interface ZoneDraft {
@@ -152,6 +154,13 @@ export async function createEvent(input: CreateEventInput): Promise<EventItem> {
 
 export async function updateEvent(id: string, input: UpdateEventInput): Promise<EventItem> {
   const response = await apiClient.patch<EventItem>(`/events/${id}`, input);
+  return response.data;
+}
+
+/** #22 — sin "descancelar" en esta versión, mismo criterio de simplicidad
+ * que otros recursos sin delete (Venue, VenueSection). */
+export async function cancelEvent(id: string): Promise<EventItem> {
+  const response = await apiClient.post<EventItem>(`/events/${id}/cancel`);
   return response.data;
 }
 

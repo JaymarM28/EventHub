@@ -225,6 +225,20 @@ export class TicketsService {
   }
 
   /**
+   * #22 — anula todos los boletos de una orden reembolsada (order.refunded,
+   * ver TicketsConsumer). `updateMany` con `refundedAt: null` en el where
+   * es idempotente a propósito: reprocesar el mismo evento dos veces
+   * (redelivery de RabbitMQ) no pisa nada ni falla, la segunda vez
+   * simplemente no encuentra filas que actualizar.
+   */
+  async refundByOrder(orderId: string): Promise<void> {
+    await this.prisma.ticket.updateMany({
+      where: { orderId, refundedAt: null },
+      data: { refundedAt: new Date() },
+    });
+  }
+
+  /**
    * Fase 2 (asiento individual) — disponibilidad de butacas de una zona
    * para que el comprador elija en el mapa (VenueSeatMap, mobile). Una
    * sola consulta de qué seatIds ya tienen Ticket (sold=true) sobre el
@@ -374,8 +388,25 @@ export class TicketsService {
    */
   async validateScan(ticketId: string): Promise<
     | { valid: true; ticket: { id: string; zoneId: string; userId: string } }
-    | { valid: false; reason: string; scannedAt: Date }
+    | { valid: false; reason: string; scannedAt: Date | null; refunded?: true }
   > {
+    // #22 — chequeo ANTES del updateMany atómico: un boleto reembolsado
+    // nunca debe marcarse scannedAt, ni siquiera si nunca fue usado. Esto
+    // no compite con la garantía de "un solo escaneo válido" de abajo —
+    // son dos motivos de rechazo distintos, no la misma carrera.
+    const existing = await this.prisma.ticket.findUnique({ where: { id: ticketId } });
+    if (!existing) {
+      throw new NotFoundException(`Boleto ${ticketId} no existe`);
+    }
+    if (existing.refundedAt) {
+      return {
+        valid: false,
+        reason: 'Este boleto fue reembolsado',
+        scannedAt: existing.scannedAt,
+        refunded: true,
+      };
+    }
+
     const result = await this.prisma.ticket.updateMany({
       where: { id: ticketId, scannedAt: null },
       data: { scannedAt: new Date() },

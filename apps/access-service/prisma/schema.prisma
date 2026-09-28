@@ -11,6 +11,9 @@ datasource db {
 enum ScanResult {
   VALID
   ALREADY_USED
+  /// #22 — boleto de una orden reembolsada, distinto de ALREADY_USED:
+  /// nunca se marcó como usado, se anuló por el reembolso.
+  REFUNDED
   INVALID
   DEGRADED
   FORBIDDEN

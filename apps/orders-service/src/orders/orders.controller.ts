@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Get, HttpCode, Param, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
-import { InternalHeaders, InternalUser, InternalUserContext, Public, RawInternalHeaders } from '@event-hub/internal-auth';
+import { InternalHeaders, InternalUser, InternalUserContext, Public, RawInternalHeaders, Roles } from '@event-hub/internal-auth';
 import { OrdersService } from './orders.service';
 import { WompiClientService } from './wompi-client.service';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -43,6 +43,26 @@ export class OrdersController {
   @Get('mine')
   findMine(@InternalUser() user: InternalUserContext) {
     return this.ordersService.findByUser(user.userId);
+  }
+
+  /** #22 — soporte al comprador: el organizador ve las órdenes de las
+   * zonas de SU evento (resueltas del lado del admin panel/events-service,
+   * no acá) antes de poder reembolsar una puntual. */
+  @Get('for-zones')
+  @Roles('ORGANIZER', 'SUPER_ADMIN')
+  findByZones(@Query('zoneIds') zoneIds: string) {
+    const ids = zoneIds ? zoneIds.split(',').filter(Boolean) : [];
+    return this.ordersService.findByZones(ids);
+  }
+
+  @Post(':id/refund')
+  @Roles('ORGANIZER', 'SUPER_ADMIN')
+  refund(
+    @Param('id') id: string,
+    @InternalUser() user: InternalUserContext,
+    @InternalHeaders() headers: RawInternalHeaders,
+  ) {
+    return this.ordersService.refund(id, user, headers);
   }
 
   /**

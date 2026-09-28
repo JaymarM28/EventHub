@@ -9,6 +9,7 @@ import { TicketsClientService, TicketsServiceUnavailableError } from './tickets-
 export type ScanOutcome =
   | { status: 'VALID'; ticket: { id: string; zoneId: string; userId: string } }
   | { status: 'ALREADY_USED'; message: string; scannedAt: string }
+  | { status: 'REFUNDED'; message: string }
   | { status: 'INVALID'; message: string }
   | { status: 'DEGRADED'; message: string }
   | { status: 'FORBIDDEN'; message: string };
@@ -74,7 +75,10 @@ export class ScansService {
       if (result.valid) {
         return this.finish(ticketId, 'VALID', null, scannedBy.userId, result.ticket);
       }
-      return this.finish(ticketId, 'ALREADY_USED', result.reason, scannedBy.userId, undefined, result.scannedAt);
+      if (result.refunded) {
+        return this.finish(ticketId, 'REFUNDED', result.reason, scannedBy.userId);
+      }
+      return this.finish(ticketId, 'ALREADY_USED', result.reason, scannedBy.userId, undefined, result.scannedAt!);
     } catch (err) {
       if (err instanceof NotFoundException) {
         return this.finish(ticketId, 'INVALID', 'Boleto no existe', scannedBy.userId);
@@ -108,6 +112,7 @@ export class ScansService {
 
     if (status === 'VALID') return { status: 'VALID', ticket: ticket! };
     if (status === 'ALREADY_USED') return { status: 'ALREADY_USED', message: message!, scannedAt: scannedAt! };
+    if (status === 'REFUNDED') return { status: 'REFUNDED', message: message! };
     if (status === 'INVALID') return { status: 'INVALID', message: message! };
     if (status === 'FORBIDDEN') return { status: 'FORBIDDEN', message: message! };
     return { status: 'DEGRADED', message: message! };

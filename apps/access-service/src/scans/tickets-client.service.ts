@@ -7,7 +7,7 @@ import { RawInternalHeaders } from '@event-hub/internal-auth';
 
 export type ValidateResult =
   | { valid: true; ticket: { id: string; zoneId: string; userId: string } }
-  | { valid: false; reason: string; scannedAt: string };
+  | { valid: false; reason: string; scannedAt: string | null; refunded?: true };
 
 export interface PeekResult {
   id: string;

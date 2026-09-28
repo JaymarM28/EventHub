@@ -85,6 +85,25 @@ describe('ScansService', () => {
     expect(result.status).toBe('ALREADY_USED');
   });
 
+  it('#22 REFUNDED: boleto genuino pero de una orden reembolsada', async () => {
+    const token = signTicketToken('ticket-1', QR_SECRET);
+    ticketsClient.peek.mockResolvedValue({ id: 'ticket-1', zoneId: 'zone-1', eventId: 'event-1', userId: 'user-1', scannedAt: null });
+    eventAccess.isAuthorized.mockResolvedValue(true);
+    ticketsClient.validate.mockResolvedValue({
+      valid: false,
+      reason: 'Este boleto fue reembolsado',
+      scannedAt: null,
+      refunded: true,
+    });
+
+    const result = await service.scan(token, staffUser, headers);
+
+    expect(result).toEqual({ status: 'REFUNDED', message: 'Este boleto fue reembolsado' });
+    expect(prisma.scanLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ result: 'REFUNDED' }) }),
+    );
+  });
+
   it('INVALID: QR con firma alterada — ni siquiera llama a tickets-service', async () => {
     const result = await service.scan('ticket-1.firma-falsa', staffUser, headers);
 

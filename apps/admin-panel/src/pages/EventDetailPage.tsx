@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   addStaff,
   addZone,
+  cancelEvent,
   createDiscountCode,
   findEvent,
   generateSeats,
@@ -23,11 +24,13 @@ import {
   type StaffMember,
   type ZoneDraft,
 } from '../api/events';
+import { listOrdersForZones, refundOrder, type Order } from '../api/orders';
 import { extractErrorMessage } from '../api/client';
 import { useDashboardSocket } from '../hooks/useDashboardSocket';
 import { Pagination, usePagination } from '../components/Pagination';
 import { Skeleton, TableSkeleton } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../components/ConfirmDialog';
 import { SalesChart } from '../components/SalesChart';
 import { downloadCsv } from '../components/csv';
 import { ImageUploadField } from '../components/ImageUploadField';
@@ -112,6 +115,7 @@ export function EventDetailPage() {
       />
       <StaffSection eventId={eventId} staff={staff} onStaffAdded={(s) => setStaff((prev) => [...(prev ?? []), s])} />
       <DiscountCodesSection eventId={eventId} codes={discountCodes} onChanged={reloadDiscountCodes} />
+      <OrdersSection zoneIds={dashboard?.zones.map((z) => z.zoneId) ?? []} />
     </div>
   );
 }
@@ -127,7 +131,30 @@ function EventHeader({ event, onUpdated }: { event: EventItem; onUpdated: (event
   const [galleryImages, setGalleryImages] = useState<string[]>(event.galleryImageUrls);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const { showToast } = useToast();
+  const confirm = useConfirm();
+
+  const onCancelEvent = async () => {
+    const ok = await confirm({
+      title: 'Cancelar evento',
+      message:
+        'Esto reembolsa AUTOMÁTICAMENTE todas las órdenes pagadas de este evento (dinero real, vía Wompi) y no se puede deshacer. ¿Confirmás?',
+      confirmLabel: 'Sí, cancelar y reembolsar todo',
+      danger: true,
+    });
+    if (!ok) return;
+    setCancelling(true);
+    try {
+      const updated = await cancelEvent(event.id);
+      onUpdated(updated);
+      showToast('Evento cancelado — reembolsando las órdenes pagadas');
+    } catch (err) {
+      showToast(extractErrorMessage(err), 'error');
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -164,7 +191,10 @@ function EventHeader({ event, onUpdated }: { event: EventItem; onUpdated: (event
           />
         )}
         <div>
-          <h1>{event.title}</h1>
+          <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+            <h1>{event.title}</h1>
+            {event.cancelledAt && <span className="badge" style={{ background: 'var(--error)' }}>Cancelado</span>}
+          </div>
           <p className="muted">
             {event.venue}
             {event.city ? `, ${event.city}` : ''} ·{' '}
@@ -173,9 +203,16 @@ function EventHeader({ event, onUpdated }: { event: EventItem; onUpdated: (event
           </p>
           {event.description && <p style={{ marginTop: 8 }}>{event.description}</p>}
         </div>
-        <button className="btn-secondary" onClick={() => setEditing(true)}>
-          Editar
-        </button>
+        <div className="row" style={{ gap: 8 }}>
+          <button className="btn-secondary" onClick={() => setEditing(true)}>
+            Editar
+          </button>
+          {!event.cancelledAt && (
+            <button className="btn-danger" onClick={onCancelEvent} disabled={cancelling}>
+              {cancelling ? 'Cancelando…' : 'Cancelar evento'}
+            </button>
+          )}
+        </div>
       </div>
     );
   }
@@ -633,6 +670,108 @@ function GenerateSeatsRow({
         {error && <p className="error-text">{error}</p>}
       </td>
     </tr>
+  );
+}
+
+const ORDER_STATUS_LABELS: Record<Order['status'], string> = {
+  PENDING: 'Pendiente',
+  PAID: 'Pagada',
+  FAILED: 'Fallida',
+  REFUNDED: 'Reembolsada',
+};
+
+/** #22 — soporte al comprador: el organizador ve las órdenes pagadas de
+ * SU evento y puede reembolsar una puntual sin tener que cancelar el
+ * evento entero. Solo aparecen PAID/REFUNDED (ver OrdersService.findByZones)
+ * — una orden PENDING/FAILED no tiene nada que reembolsar. */
+function OrdersSection({ zoneIds }: { zoneIds: string[] }) {
+  const [orders, setOrders] = useState<Order[] | null>(null);
+  const [refundingId, setRefundingId] = useState<string | null>(null);
+  const { showToast } = useToast();
+  const confirm = useConfirm();
+  const { page, setPage, totalPages, pageItems } = usePagination(orders ?? []);
+  const zoneIdsKey = zoneIds.join(',');
+
+  const reload = useCallback(() => {
+    if (zoneIdsKey === '') {
+      setOrders([]);
+      return;
+    }
+    listOrdersForZones(zoneIdsKey.split(',')).then(setOrders).catch(() => {});
+  }, [zoneIdsKey]);
+
+  useEffect(reload, [reload]);
+
+  const onRefund = async (order: Order) => {
+    const ok = await confirm({
+      title: 'Reembolsar orden',
+      message: `Esto le devuelve $${order.amount} a través de Wompi y anula sus boletos — no se puede deshacer. ¿Confirmás?`,
+      confirmLabel: 'Sí, reembolsar',
+      danger: true,
+    });
+    if (!ok) return;
+    setRefundingId(order.id);
+    try {
+      await refundOrder(order.id);
+      showToast('Orden reembolsada');
+      reload();
+    } catch (err) {
+      showToast(extractErrorMessage(err), 'error');
+    } finally {
+      setRefundingId(null);
+    }
+  };
+
+  return (
+    <div className="card">
+      <div className="section-header">
+        <h2>Órdenes</h2>
+        <p className="subtitle">Compras pagadas de este evento — reembolsá una puntual si hace falta.</p>
+      </div>
+      {orders === null && <div style={{ marginTop: 16 }}><TableSkeleton cols={5} /></div>}
+      {orders && orders.length === 0 && <p className="empty-state">Todavía no hay órdenes pagadas.</p>}
+      {orders && orders.length > 0 && (
+        <>
+          <table style={{ marginTop: 16 }}>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Cantidad</th>
+                <th>Monto</th>
+                <th>Estado</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {pageItems.map((order) => (
+                <tr key={order.id}>
+                  <td>{new Date(order.createdAt).toLocaleString('es', { dateStyle: 'medium', timeStyle: 'short' })}</td>
+                  <td>{order.quantity}</td>
+                  <td>${order.amount} {order.currency}</td>
+                  <td>
+                    <span className={order.status === 'REFUNDED' ? 'badge-outline' : 'badge-accent'}>
+                      {ORDER_STATUS_LABELS[order.status]}
+                    </span>
+                  </td>
+                  <td>
+                    {order.status === 'PAID' && (
+                      <button
+                        className="btn-danger"
+                        onClick={() => onRefund(order)}
+                        disabled={refundingId === order.id}
+                      >
+                        {refundingId === order.id ? 'Reembolsando…' : 'Reembolsar'}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <Pagination page={page} totalPages={totalPages} onChange={setPage} />
+        </>
+      )}
+    </div>
   );
 }
 

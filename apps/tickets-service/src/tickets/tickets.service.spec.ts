@@ -353,6 +353,7 @@ describe('TicketsService', () => {
 
   describe('validateScan', () => {
     it('marca el boleto como usado y devuelve valid:true en el primer escaneo', async () => {
+      prisma.ticket.findUnique.mockResolvedValue({ id: 'ticket-1', refundedAt: null });
       prisma.ticket.updateMany.mockResolvedValue({ count: 1 });
       prisma.ticket.findUniqueOrThrow.mockResolvedValue({
         id: 'ticket-1',
@@ -396,6 +397,37 @@ describe('TicketsService', () => {
       await expect(service.validateScan('no-existe')).rejects.toBeInstanceOf(
         NotFoundException,
       );
+    });
+
+    it('#22 GARANTÍA: rechaza un boleto reembolsado SIN marcarlo como usado, aunque nunca haya sido escaneado', async () => {
+      prisma.ticket.findUnique.mockResolvedValue({
+        id: 'ticket-1',
+        refundedAt: new Date('2026-09-28T00:00:00Z'),
+        scannedAt: null,
+      });
+
+      const result = await service.validateScan('ticket-1');
+
+      expect(result).toEqual({
+        valid: false,
+        reason: 'Este boleto fue reembolsado',
+        scannedAt: null,
+        refunded: true,
+      });
+      expect(prisma.ticket.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('refundByOrder', () => {
+    it('marca refundedAt en los boletos de la orden que todavía no estaban reembolsados', async () => {
+      prisma.ticket.updateMany.mockResolvedValue({ count: 2 });
+
+      await service.refundByOrder('order-1');
+
+      expect(prisma.ticket.updateMany).toHaveBeenCalledWith({
+        where: { orderId: 'order-1', refundedAt: null },
+        data: { refundedAt: expect.any(Date) },
+      });
     });
   });
 

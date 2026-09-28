@@ -1,7 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
-import { RawInternalHeaders } from '@event-hub/internal-auth';
+import { InternalUserContext, RawInternalHeaders } from '@event-hub/internal-auth';
 import { EVENT_TYPES } from '@event-hub/shared-types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TicketsClientService } from './tickets-client.service';
@@ -183,5 +183,103 @@ export class OrdersService {
 
   findByUser(userId: string) {
     return this.prisma.order.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
+  }
+
+  /** Lista de órdenes de un organizador — soporte al comprador (#22):
+   * necesita VER las órdenes de su evento antes de poder reembolsar una
+   * puntual. `zoneIds` lo resuelve el caller (events-service sabe qué
+   * zonas son de qué evento; orders-service no tiene esa relación). */
+  findByZones(zoneIds: string[]) {
+    if (zoneIds.length === 0) return Promise.resolve([]);
+    return this.prisma.order.findMany({
+      where: { zoneId: { in: zoneIds }, status: { in: ['PAID', 'REFUNDED'] } },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  /**
+   * #22 — reembolso de una orden puntual, iniciado por el organizador (o
+   * SUPER_ADMIN) desde el admin panel. Solo alcanzable desde PAID, sin
+   * parcial (decisión del usuario): reembolsa el monto TOTAL de la orden,
+   * nunca una fracción.
+   */
+  async refund(orderId: string, requester: InternalUserContext, headers: RawInternalHeaders) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) {
+      throw new NotFoundException(`Orden ${orderId} no existe`);
+    }
+    if (order.status !== 'PAID') {
+      throw new BadRequestException(`Solo se puede reembolsar una orden pagada — esta está en estado ${order.status}`);
+    }
+
+    const zoneOwner = await this.eventsClient.getZoneOwner(order.zoneId, headers);
+    if (!requester.roles.includes('SUPER_ADMIN') && requester.userId !== zoneOwner.organizerId) {
+      throw new ForbiddenException('No sos el organizador de este evento — no podés reembolsar esta orden');
+    }
+
+    return this.performRefund(order, 'Reembolso solicitado por el organizador');
+  }
+
+  /**
+   * #22 — reembolso en bloque disparado por `event.cancelled` (ver
+   * OrdersEventsConsumer). Sin chequeo de ownership acá: cancelar el
+   * evento YA lo autorizó events-service (el organizador dueño, o
+   * SUPER_ADMIN) — este paso solo ejecuta la consecuencia.
+   */
+  async refundAllForZones(zoneIds: string[]): Promise<void> {
+    if (zoneIds.length === 0) return;
+    const orders = await this.prisma.order.findMany({ where: { zoneId: { in: zoneIds }, status: 'PAID' } });
+    for (const order of orders) {
+      try {
+        await this.performRefund(order, 'Evento cancelado por el organizador');
+      } catch (err) {
+        // Una orden que falla no debe frenar el reembolso de las demás —
+        // cada una es independiente. Queda PAID (no REFUNDED), visible en
+        // el admin panel para reintento manual — ver findByZones.
+        this.logger.error(`No se pudo reembolsar la orden ${order.id} al cancelar el evento: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  private async performRefund(
+    order: { id: string; userId: string; zoneId: string; quantity: number; seatIds: string[]; amount: unknown; wompiTransactionId: string | null },
+    reason: string,
+  ) {
+    if (!order.wompiTransactionId) {
+      throw new BadRequestException('Esta orden no tiene una transacción de Wompi confirmada — no se puede reembolsar');
+    }
+
+    const amountInCents = Math.round(Number(order.amount) * 100);
+    const refund = await this.wompi.refundTransaction(order.wompiTransactionId, amountInCents, reason);
+    // PENDING es un estado real de Wompi (verificado en vivo contra el
+    // sandbox, no supuesto) — igual que el pago original, un reembolso NO
+    // siempre se confirma en el mismo request. Sin un webhook de refunds
+    // documentado por Wompi para confirmar el resultado final más tarde,
+    // se trata PENDING como éxito operativo (se aplicó la reversión del
+    // lado nuestro) — solo DECLINED/ERROR/CANCELLED son rechazos reales.
+    if (refund.status !== 'APPROVED' && refund.status !== 'PENDING') {
+      throw new BadRequestException(`Wompi no aprobó el reembolso (status: ${refund.status})`);
+    }
+
+    const eventId = randomUUID();
+    await this.prisma.$transaction([
+      this.prisma.order.update({
+        where: { id: order.id },
+        data: { status: 'REFUNDED', refundedAt: new Date(), wompiRefundId: String(refund.id) },
+      }),
+      this.prisma.outboxEvent.create({
+        data: {
+          id: eventId,
+          type: EVENT_TYPES.ORDER_REFUNDED,
+          payload: {
+            orderId: order.id,
+            userId: order.userId,
+            zoneId: order.zoneId,
+            quantity: order.quantity,
+            ...(order.seatIds.length > 0 && { seatIds: order.seatIds }),
+          },
+        },
+      }),
+    ]);
   }
 }

@@ -190,6 +190,36 @@ export class EventsService {
   }
 
   /**
+   * #22 — cancela el evento y dispara el reembolso en bloque de TODAS sus
+   * órdenes pagadas (orders-service consume event.cancelled — ver
+   * OrdersEventsConsumer). Sin reversión: no hay "descancelar" en esta
+   * versión, mismo criterio de simplicidad que "sin delete" en otros
+   * recursos del proyecto (Venue, VenueSection).
+   */
+  async cancel(id: string, requester: InternalUserContext) {
+    const existing = await this.findOne(id); // 404 si no existe
+    this.assertOwner(existing.organizerId, requester, 'cancelarlo');
+
+    if (existing.cancelledAt) {
+      throw new BadRequestException('Este evento ya está cancelado');
+    }
+
+    const event = await this.prisma.event.update({
+      where: { id },
+      data: { cancelledAt: new Date() },
+      include: { zones: true },
+    });
+
+    await this.publisher.publish(EVENT_TYPES.EVENT_CANCELLED, {
+      id: event.id,
+      organizerId: event.organizerId,
+      zoneIds: event.zones.map((z) => z.id),
+    });
+
+    return event;
+  }
+
+  /**
    * Da de alta a alguien del equipo de STAFF del evento — mismo chequeo de
    * ownership que `update()` (dueño del evento o SUPER_ADMIN), nunca por
    * rol global únicamente (TODOS.md #4). Crea la cuenta en auth-service

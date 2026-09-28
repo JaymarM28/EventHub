@@ -12,6 +12,10 @@ enum OrderStatus {
   PENDING
   PAID
   FAILED
+  /// #22 — solo alcanzable desde PAID (ver OrdersService.refund). Reembolso
+  /// de la orden completa, sin parcial (decisión del usuario) — una orden
+  /// con varios boletos (Fase A) se reembolsa/anula entera o nada.
+  REFUNDED
 }
 
 model Order {
@@ -49,6 +53,10 @@ model Order {
   /// registro de qué se aplicó a ESTA orden.
   discountCode   String?
   discountAmount Decimal? @db.Decimal(10, 2)
+  /// #22 — id del reembolso en Wompi (Refunds V2) y cuándo se aplicó.
+  /// Ambos nullable: la inmensa mayoría de las órdenes nunca se reembolsan.
+  wompiRefundId String?
+  refundedAt    DateTime?
   status        OrderStatus @default(PENDING)
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt

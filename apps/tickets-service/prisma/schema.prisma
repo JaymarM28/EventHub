@@ -72,6 +72,10 @@ model Ticket {
   /// `SELECT...FOR UPDATE` como en la zona (confirmFromOrder), acá el
   /// índice único lo garantiza solo, sin lock manual.
   seatId String? @unique
+  /// #22 — null = boleto vigente. Se marca al consumir order.refunded
+  /// (TicketsConsumer) — ver ScansService.scan() para el estado
+  /// REFUNDED, distinto de INVALID/ALREADY_USED, que rechaza el escaneo.
+  refundedAt DateTime?
 
   @@index([zoneId])
   @@index([userId])

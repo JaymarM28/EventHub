@@ -5,9 +5,12 @@ import { EXCHANGES } from '@event-hub/shared-types';
 import { ORDER_EVENTS_CLIENT } from './messaging.constants';
 
 /**
- * Solo para PUBLICAR — orders-service no consume eventos (no tiene
- * @EventPattern). El poller del outbox (outbox.service.ts) es el único
- * consumidor de este ClientProxy.
+ * Este ClientProxy es solo para PUBLICAR — el poller del outbox
+ * (outbox.service.ts) es su único consumidor. #22: orders-service SÍ pasó
+ * a consumir eventos de dominio (event.cancelled, ver OrdersConsumer),
+ * pero esa cola/conexión de consumidor se registra aparte en main.ts
+ * (`app.connectMicroservice`), no acá — este módulo sigue siendo
+ * exclusivamente el lado de publicación.
  */
 @Global()
 @Module({
