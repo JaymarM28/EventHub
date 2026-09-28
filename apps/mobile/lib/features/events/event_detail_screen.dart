@@ -278,11 +278,7 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
                       VenueSeatMap(
                         venueMap: event.venueMap!,
                         zones: event.zones,
-                        selectedZoneId: null,
-                        onSectionTap: (zoneId) {
-                          final zone = event.zones.firstWhere((z) => z.id == zoneId);
-                          _onZoneTap(context, event, zone);
-                        },
+                        onConfirmBuy: (zone) => _onZoneTap(context, event, zone),
                       ),
                       const SizedBox(height: 16),
                     ],
