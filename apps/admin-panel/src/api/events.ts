@@ -142,6 +142,15 @@ export async function findMyEvents(): Promise<EventItem[]> {
   return response.data;
 }
 
+/** #24 — GET /events es público y devuelve TODOS los eventos de TODOS los
+ * organizadores (con `organizerId` y `zones` incluidos) — lo usa la
+ * pantalla de liquidaciones del SUPER_ADMIN para resolver qué zoneIds son
+ * de qué organizador, sin necesitar un endpoint nuevo para eso. */
+export async function listAllEvents(): Promise<EventItem[]> {
+  const response = await apiClient.get<EventItem[]>('/events');
+  return response.data;
+}
+
 export async function findEvent(id: string): Promise<EventItem> {
   const response = await apiClient.get<EventItem>(`/events/${id}`);
   return response.data;

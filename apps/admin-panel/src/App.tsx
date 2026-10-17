@@ -8,6 +8,7 @@ import { MyEventsPage } from './pages/MyEventsPage';
 import { EventDetailPage } from './pages/EventDetailPage';
 import { AdminPage } from './pages/AdminPage';
 import { VenueMapPage } from './pages/VenueMapPage';
+import { PayoutsPage } from './pages/PayoutsPage';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { token } = useAuth();
@@ -43,6 +44,14 @@ function Shell() {
         element={
           <RequireAuth>
             <EventDetailPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/payouts"
+        element={
+          <RequireAuth>
+            <PayoutsPage />
           </RequireAuth>
         }
       />

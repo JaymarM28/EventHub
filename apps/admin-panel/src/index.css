@@ -132,6 +132,26 @@ a {
   color: var(--error);
 }
 
+/* #24 — par etiqueta/valor para mostrar datos de solo lectura (ej. la
+   cuenta de cobro guardada) sin armar una tabla de una sola fila. */
+.detail-grid {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  row-gap: 8px;
+  column-gap: 12px;
+  margin: 0;
+}
+
+.detail-grid dt {
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.detail-grid dd {
+  margin: 0;
+}
+
 label {
   display: block;
   font-size: 13px;

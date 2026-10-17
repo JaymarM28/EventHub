@@ -57,11 +57,88 @@ model Order {
   /// Ambos nullable: la inmensa mayoría de las órdenes nunca se reembolsan.
   wompiRefundId String?
   refundedAt    DateTime?
+  /// #24 (modelo de negocio, TODOS.md #13) — porción de `amount` que es el
+  /// cargo por servicio de la plataforma (comprador lo paga, organizador
+  /// nunca lo ve descontado). `amount` sigue siendo el TOTAL cobrado al
+  /// comprador (precio de zona + este cargo); lo que se le debe al
+  /// organizador es `amount - serviceFeeAmount`. Default 0 para no romper
+  /// filas viejas de antes de esta migración.
+  serviceFeeAmount Decimal @db.Decimal(10, 2) @default(0)
+  /// Null = todavía no se le liquidó al organizador su parte de esta orden.
+  /// Se completa recién cuando `PayoutsService.settle` la agrupa en un
+  /// Payout — antes de eso, la orden PAID sigue "pendiente de liquidar".
+  payoutId String?
+  payout   Payout? @relation(fields: [payoutId], references: [id])
   status        OrderStatus @default(PENDING)
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
+  @@index([payoutId])
   @@map("orders")
+}
+
+enum PayoutStatus {
+  /// No se usa todavía (ver TODOS.md #13) — reservado para cuando se
+  /// automatice vía la API de Payouts de Wompi (que liquida async, como el
+  /// pago original) en vez de crear el Payout directamente en SETTLED.
+  PENDING
+  SETTLED
+}
+
+enum BankAccountType {
+  SAVINGS
+  CHECKING
+}
+
+/// #24 — datos bancarios del organizador para poder pagarle su parte de las
+/// ventas. Uno por organizador (self-service, lo carga él mismo desde el
+/// admin panel) — sin historial de cambios: si cambia de cuenta, se
+/// sobreescribe (no hay auditoría de "cuenta anterior" en esta versión,
+/// mismo criterio de simplicidad que otros recursos sin historial del
+/// proyecto).
+model OrganizerPayoutAccount {
+  id            String          @id @default(uuid())
+  organizerId   String          @unique
+  accountType   BankAccountType
+  accountNumber String
+  /// Código del banco tal como lo pide la API de Payouts de Wompi — no se
+  /// valida contra una lista propia, el organizador lo tipea.
+  bankCode      String
+  /// Solo para mostrar en el admin panel (evita otro join/llamada nada más
+  /// para un nombre legible) — Wompi solo necesita `bankCode`.
+  bankName      String
+  legalIdType   String
+  legalId       String
+  fullName      String
+  email         String
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@map("organizer_payout_accounts")
+}
+
+/// #24 — agrupa las órdenes PAID de un organizador que se liquidaron
+/// juntas. MANUAL por ahora (ver TODOS.md #13): todavía no dispara la API
+/// de Payouts de Wompi, `externalReference` es el comprobante de la
+/// transferencia que se hizo por fuera de la plataforma — automatizar esto
+/// queda pendiente de confirmar fees/límites con Wompi.
+model Payout {
+  id                String       @id @default(uuid())
+  organizerId       String
+  /// Neto pagado = suma de (amount - serviceFeeAmount) de las órdenes
+  /// incluidas — nunca incluye el cargo por servicio, que es ingreso de la
+  /// plataforma, no del organizador.
+  totalAmount       Decimal      @db.Decimal(10, 2)
+  ordersCount       Int
+  status            PayoutStatus @default(SETTLED)
+  externalReference String?
+  notes             String?
+  createdAt         DateTime     @default(now())
+  settledAt         DateTime?
+  orders            Order[]
+
+  @@index([organizerId])
+  @@map("payouts")
 }
 
 /// Patrón transactional outbox (premisa 8 de DESIGN.md): la confirmación

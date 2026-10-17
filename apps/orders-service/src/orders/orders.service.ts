@@ -24,6 +24,13 @@ const TERMINAL_FAILURE_STATUSES = new Set<WompiTransactionStatus>(['DECLINED', '
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
+  /// #24 (modelo de negocio, TODOS.md #13) — cargo por servicio que paga el
+  /// COMPRADOR, encima del precio que publicó el organizador (nunca se le
+  /// descuenta a él). Configurable por env en vez de hardcodeado para poder
+  /// ajustarlo sin deploy — 0.10 (10%) es el default acordado con el
+  /// usuario 2026-09-28, pendiente de confirmar fees reales de Wompi
+  /// Payouts antes de automatizar el otro lado (ver PayoutsService).
+  private readonly serviceFeeRate: number;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -31,7 +38,9 @@ export class OrdersService {
     private readonly wompi: WompiClientService,
     private readonly eventsClient: EventsClientService,
     private readonly config: ConfigService,
-  ) {}
+  ) {
+    this.serviceFeeRate = Number(this.config.get<string>('SERVICE_FEE_RATE') ?? '0.10');
+  }
 
   async checkout(
     zoneId: string,
@@ -71,7 +80,16 @@ export class OrdersService {
         throw err;
       }
     }
-    const totalAmount = subtotal - discountAmount;
+    // Monto que le corresponde al organizador (precio de zona - descuento)
+    // — el cargo por servicio se calcula sobre ESTO, nunca sobre el precio
+    // antes de descuento, para no cobrarle de más al comprador que usó un
+    // código válido.
+    const organizerAmount = subtotal - discountAmount;
+    const serviceFeeAmount = Math.round(organizerAmount * this.serviceFeeRate * 100) / 100;
+    // `amount` = TOTAL cobrado al comprador (lo que se carga en Wompi);
+    // `serviceFeeAmount` es la porción de eso que es ingreso de la
+    // plataforma, nunca del organizador (ver PayoutsService.pendingSummary).
+    const totalAmount = organizerAmount + serviceFeeAmount;
 
     const order = await this.prisma.order.create({
       data: {
@@ -81,6 +99,7 @@ export class OrdersService {
         quantity: reservation.quantity,
         ...(reservation.seatIds && { seatIds: reservation.seatIds }),
         amount: totalAmount,
+        serviceFeeAmount,
         currency: reservation.currency,
         ...(appliedCode && { discountCode: appliedCode, discountAmount }),
         status: 'PENDING',

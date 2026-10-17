@@ -71,7 +71,13 @@ describe('OrdersService', () => {
         { provide: EventsClientService, useValue: eventsClient },
         {
           provide: ConfigService,
-          useValue: { getOrThrow: (key: string) => (key === 'INTERNAL_AUTH_SECRET' ? 'test-secret' : key) },
+          useValue: {
+            getOrThrow: (key: string) => (key === 'INTERNAL_AUTH_SECRET' ? 'test-secret' : key),
+            // 0.10 (10%) — mismo default que el real, para que los montos
+            // esperados en los tests de checkout no dependan de adivinar
+            // qué devuelve el mock.
+            get: (key: string) => (key === 'SERVICE_FEE_RATE' ? '0.10' : undefined),
+          },
         },
       ],
     }).compile();
@@ -90,26 +96,30 @@ describe('OrdersService', () => {
             userId: 'user-1',
             reservationId: 'res-1',
             quantity: 1,
-            amount: 50,
+            // #24: 50 (precio) + 10% de cargo por servicio = 55 cobrados,
+            // de los cuales 5 es serviceFeeAmount (nunca del organizador).
+            amount: 55,
+            serviceFeeAmount: 5,
             currency: 'COP',
             status: 'PENDING',
           }),
         }),
       );
-      expect(wompi.buildCheckoutUrl).toHaveBeenCalledWith('order-1', 50, 'COP');
+      expect(wompi.buildCheckoutUrl).toHaveBeenCalledWith('order-1', 55, 'COP');
       expect(result.checkoutUrl).toBe('https://checkout.wompi.co/p/?ref=order-1');
       // El pago todavía no se confirmó — order.paid se publica recién en el webhook.
       expect(prisma.outboxEvent.create).not.toHaveBeenCalled();
     });
 
-    it('Fase A: el monto TOTAL (unitario × cantidad) es lo que se firma en la URL de Wompi', async () => {
+    it('Fase A: el monto TOTAL (unitario × cantidad + cargo por servicio) es lo que se firma en la URL de Wompi', async () => {
       ticketsClient.reserve.mockResolvedValue({ ...reservation, quantity: 4 });
 
       await service.checkout('zone-1', 4, 'user-1', 'user1@example.com', headers);
 
-      expect(wompi.buildCheckoutUrl).toHaveBeenCalledWith('order-1', 200, 'COP');
+      // 50 × 4 = 200 + 10% (20) de cargo por servicio = 220.
+      expect(wompi.buildCheckoutUrl).toHaveBeenCalledWith('order-1', 220, 'COP');
       expect(prisma.order.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ quantity: 4, amount: 200 }) }),
+        expect.objectContaining({ data: expect.objectContaining({ quantity: 4, amount: 220, serviceFeeAmount: 20 }) }),
       );
     });
 
@@ -128,7 +138,12 @@ describe('OrdersService', () => {
       expect(ticketsClient.reserve).toHaveBeenCalledWith('zone-1', ['seat-1', 'seat-2'], headers);
       expect(prisma.order.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ quantity: 2, seatIds: ['seat-1', 'seat-2'], amount: 100 }),
+          data: expect.objectContaining({
+            quantity: 2,
+            seatIds: ['seat-1', 'seat-2'],
+            amount: 110,
+            serviceFeeAmount: 10,
+          }),
         }),
       );
     });
@@ -139,12 +154,19 @@ describe('OrdersService', () => {
       await service.checkout('zone-1', 1, 'user-1', 'user1@example.com', headers, 'amigos20');
 
       expect(eventsClient.redeemDiscountCode).toHaveBeenCalledWith('zone-1', 'amigos20', headers);
+      // subtotal 50 - descuento 10 = 40 (lo que le corresponde al
+      // organizador) + 10% de cargo por servicio (4) = 44 cobrados.
       expect(prisma.order.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ amount: 40, discountCode: 'AMIGOS20', discountAmount: 10 }),
+          data: expect.objectContaining({
+            amount: 44,
+            serviceFeeAmount: 4,
+            discountCode: 'AMIGOS20',
+            discountAmount: 10,
+          }),
         }),
       );
-      expect(wompi.buildCheckoutUrl).toHaveBeenCalledWith('order-1', 40, 'COP');
+      expect(wompi.buildCheckoutUrl).toHaveBeenCalledWith('order-1', 44, 'COP');
     });
 
     it('#23: código de MONTO FIJO — nunca deja el total en negativo', async () => {
