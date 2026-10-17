@@ -33,6 +33,12 @@ model User {
   /// todavía, solo se registra; endurecerlo (exigirlo para X) queda para
   /// cuando haya una razón de negocio concreta.
   emailVerifiedAt DateTime?
+  /// Legal (2026-10-01) — cuándo aceptó los Términos y la Política de
+  /// Privacidad (ver api-gateway /legal/*). Nullable por lo mismo que
+  /// emailVerifiedAt: cuentas creadas ANTES de este campo no lo tienen, y
+  /// no vale la pena inventar un backfill. `RegisterDto.acceptedTerms`
+  /// exige `true` para cuentas NUEVAS — ver AuthService.register.
+  termsAcceptedAt DateTime?
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
   refreshTokens RefreshToken[]

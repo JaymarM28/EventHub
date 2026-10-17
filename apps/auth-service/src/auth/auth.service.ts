@@ -12,6 +12,7 @@ import * as bcrypt from 'bcrypt';
 import { createHash, randomBytes, randomInt } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
+import { PublicRegisterDto } from './dto/public-register.dto';
 import { LoginDto } from './dto/login.dto';
 import { CreateInternalUserDto } from './dto/create-internal-user.dto';
 import { Role } from '../../generated/prisma-client';
@@ -45,7 +46,7 @@ export class AuthService {
     private readonly emailClient: EmailClientService,
   ) {}
 
-  async register(dto: RegisterDto): Promise<TokenPair> {
+  async register(dto: PublicRegisterDto): Promise<TokenPair> {
     const existing = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
@@ -61,6 +62,9 @@ export class AuthService {
         firstName: dto.firstName,
         lastName: dto.lastName,
         birthDate: new Date(dto.birthDate),
+        // ValidationPipe ya garantizó que dto.acceptedTerms === true antes
+        // de llegar acá (ver PublicRegisterDto) — esto solo registra CUÁNDO.
+        termsAcceptedAt: new Date(),
       },
     });
 

@@ -2,10 +2,12 @@ import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Transport, RmqOptions } from '@nestjs/microservices';
 import { createProxyMiddleware } from 'http-proxy-middleware';
+import type { Request, Response } from 'express';
 import { EXCHANGES, deadLetterExchangeFor, queueFor } from '@event-hub/shared-types';
 import { AppModule } from './app.module';
 import { buildRoutes } from './routes';
 import { gatewayAuthMiddleware, stripClientInternalHeaders } from './gateway.middleware';
+import { privacyPolicyHtml, termsOfServiceHtml } from './legal/legal-pages';
 import { assertDeadLetterTopology } from './messaging/rabbit-topology';
 import { CONSUMER_NAME } from './messaging/messaging.constants';
 
@@ -41,6 +43,15 @@ async function bootstrap() {
   }
 
   app.use(stripClientInternalHeaders);
+
+  // Páginas legales públicas (2026-10-01) — HTML servido directo acá, sin
+  // proxyarlo a ningún servicio interno (ver legal/legal-pages.ts). Deben
+  // registrarse ANTES del loop de rutas de abajo por la misma razón que
+  // /auth/admin va antes de /auth: ninguna coincide con un prefijo
+  // existente, pero mantenerlas juntas y primero deja claro que son
+  // estáticas, no proxy.
+  app.use('/legal/privacy', (_req: Request, res: Response) => res.type('html').send(privacyPolicyHtml));
+  app.use('/legal/terms', (_req: Request, res: Response) => res.type('html').send(termsOfServiceHtml));
 
   for (const route of buildRoutes()) {
     app.use(route.pathPrefix, gatewayAuthMiddleware(route, jwtSecret, internalAuthSecret));

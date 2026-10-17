@@ -93,6 +93,7 @@ class AuthState extends ChangeNotifier {
     required String firstName,
     required String lastName,
     required DateTime birthDate,
+    required bool acceptedTerms,
   }) async {
     await _authRepository.register(
       email: email,
@@ -100,6 +101,7 @@ class AuthState extends ChangeNotifier {
       firstName: firstName,
       lastName: lastName,
       birthDate: birthDate,
+      acceptedTerms: acceptedTerms,
     );
     status = AuthStatus.authenticated;
     roles = await _authRepository.currentRoles();

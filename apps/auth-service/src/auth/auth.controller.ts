@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { AuthService } from './auth.service';
-import { RegisterDto } from './dto/register.dto';
+import { PublicRegisterDto } from './dto/public-register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
@@ -13,7 +13,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('register')
-  register(@Body() dto: RegisterDto) {
+  register(@Body() dto: PublicRegisterDto) {
     return this.authService.register(dto);
   }
 

@@ -18,12 +18,16 @@ class AuthRepository {
   final ApiClient _apiClient;
   final TokenStorage _tokenStorage;
 
+  /// Legal (2026-10-01) — `acceptedTerms` debe venir `true` (checkbox
+  /// obligatorio en register_screen.dart); el backend rechaza con 400
+  /// cualquier otro valor, ver PublicRegisterDto en auth-service.
   Future<void> register({
     required String email,
     required String password,
     required String firstName,
     required String lastName,
     required DateTime birthDate,
+    required bool acceptedTerms,
   }) async {
     await _authRequest('/auth/register', {
       'email': email,
@@ -33,6 +37,7 @@ class AuthRepository {
       // Solo la fecha (sin hora) alcanza — evita que el offset de huso
       // horario del dispositivo corra la fecha un día en el backend.
       'birthDate': birthDate.toIso8601String().split('T').first,
+      'acceptedTerms': acceptedTerms,
     });
   }
 

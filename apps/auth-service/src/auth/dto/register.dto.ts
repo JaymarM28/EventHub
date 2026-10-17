@@ -1,5 +1,9 @@
 import { IsDateString, IsEmail, IsString, MinLength } from 'class-validator';
 
+/** Base compartida — usada también por CreateInternalUserDto (organizador
+ * creando STAFF, SUPER_ADMIN creando un ORGANIZADOR). Esos casos NO son
+ * un autoregistro, así que `acceptedTerms` (ver PublicRegisterDto) vive
+ * aparte y solo aplica al registro público real. */
 export class RegisterDto {
   @IsEmail()
   email!: string;

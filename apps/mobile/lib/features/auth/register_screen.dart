@@ -1,10 +1,14 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/auth_state.dart';
+import '../../core/config.dart';
+import '../../core/nav_return.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/pressable_button.dart';
 import 'auth_repository.dart';
@@ -25,6 +29,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
   DateTime? _birthDate;
   bool _loading = false;
   String? _error;
+  // El selector de fecha no es un TextFormField (abre un picker, no es
+  // texto libre) — no puede usar el `validator` del Form como los demás
+  // campos, así que necesita su propio estado de error para mostrarse
+  // igual de pegado al campo (feedback del usuario 2026-10-01: la fecha
+  // "no se valida como los otros campos").
+  String? _dateError;
+  // Legal (2026-10-01) — obligatorio marcar antes de poder registrarse
+  // (el backend igual lo rechaza si llega `false`, ver PublicRegisterDto;
+  // esto evita el viaje de red para el caso más común de olvidarlo).
+  bool _acceptedTerms = false;
 
   @override
   void dispose() {
@@ -97,15 +111,33 @@ class _RegisterScreenState extends State<RegisterScreen> {
         );
       },
     );
-    if (picked != null) setState(() => _birthDate = picked);
+    if (picked != null) {
+      setState(() {
+        _birthDate = picked;
+        _dateError = null;
+      });
+    }
+  }
+
+  Future<void> _openLegalPage(String path) async {
+    await launchUrl(
+      Uri.parse('$gatewayBaseUrl$path'),
+      mode: LaunchMode.externalApplication,
+    );
   }
 
   Future<void> _submit() async {
-    if (_birthDate == null) {
-      setState(() => _error = 'Selecciona tu fecha de nacimiento');
+    setState(
+      () => _dateError = _birthDate == null ? 'Seleccioná tu fecha de nacimiento' : null,
+    );
+    final formValid = _formKey.currentState!.validate();
+    if (_birthDate == null || !formValid) return;
+    if (!_acceptedTerms) {
+      setState(
+        () => _error = 'Tenés que aceptar los Términos y la Política de Privacidad',
+      );
       return;
     }
-    if (!_formKey.currentState!.validate()) return;
     setState(() {
       _loading = true;
       _error = null;
@@ -117,8 +149,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
         firstName: _firstNameController.text.trim(),
         lastName: _lastNameController.text.trim(),
         birthDate: _birthDate!,
+        acceptedTerms: _acceptedTerms,
       );
-      if (mounted) context.go('/events');
+      if (mounted) {
+        final from = currentFromParam(context);
+        context.go(from != null && from.isNotEmpty ? from : '/events');
+      }
     } on AuthException catch (e) {
       setState(() => _error = e.message);
     } finally {
@@ -193,8 +229,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 GestureDetector(
                   onTap: _pickBirthDate,
                   child: InputDecorator(
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Fecha de nacimiento',
+                      errorText: _dateError,
                     ),
                     child: Text(
                       _birthDate == null
@@ -228,6 +265,49 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ? 'Mínimo 8 caracteres'
                       : null,
                 ),
+                const SizedBox(height: 18),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Checkbox(
+                      value: _acceptedTerms,
+                      onChanged: (v) =>
+                          setState(() => _acceptedTerms = v ?? false),
+                    ),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: Text.rich(
+                          TextSpan(
+                            style: Theme.of(context).textTheme.bodyMedium,
+                            children: [
+                              const TextSpan(text: 'Acepto los '),
+                              TextSpan(
+                                text: 'Términos y Condiciones',
+                                style: const TextStyle(
+                                  color: AppColors.accent,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                recognizer: TapGestureRecognizer()
+                                  ..onTap = () => _openLegalPage('/legal/terms'),
+                              ),
+                              const TextSpan(text: ' y la '),
+                              TextSpan(
+                                text: 'Política de Privacidad',
+                                style: const TextStyle(
+                                  color: AppColors.accent,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                recognizer: TapGestureRecognizer()
+                                  ..onTap = () => _openLegalPage('/legal/privacy'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
                 if (_error != null) ...[
                   const SizedBox(height: 14),
                   Text(_error!, style: const TextStyle(color: AppColors.error)),
@@ -240,7 +320,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
                 const SizedBox(height: 12),
                 TextButton(
-                  onPressed: () => context.go('/login'),
+                  onPressed: () => context.go(
+                    withFromParam('/login', currentFromParam(context)),
+                  ),
                   child: const Text('¿Ya tienes cuenta? Inicia sesión'),
                 ),
                 const SizedBox(height: 12),

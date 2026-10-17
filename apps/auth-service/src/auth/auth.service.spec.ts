@@ -100,6 +100,7 @@ describe('AuthService', () => {
         firstName: 'Ana',
         lastName: 'Gómez',
         birthDate: '1990-01-01',
+        acceptedTerms: true,
       });
 
       expect(result.accessToken).toBe('signed.jwt.token');
@@ -107,6 +108,10 @@ describe('AuthService', () => {
       expect(prisma.refreshToken.create).toHaveBeenCalledTimes(1);
       expect(prisma.emailVerificationToken.create).toHaveBeenCalledTimes(1);
       expect(emailClient.send).toHaveBeenCalledWith('a@b.com', 'Confirma tu email', expect.any(String));
+      // Legal (2026-10-01) — queda registrado CUÁNDO aceptó.
+      expect(prisma.user.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ termsAcceptedAt: expect.any(Date) }) }),
+      );
     });
 
     it('rechaza el registro si el email ya existe', async () => {
@@ -119,6 +124,7 @@ describe('AuthService', () => {
           firstName: 'Ana',
           lastName: 'Gómez',
           birthDate: '1990-01-01',
+          acceptedTerms: true,
         }),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(prisma.user.create).not.toHaveBeenCalled();
