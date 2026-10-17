@@ -38,6 +38,13 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: build paquetes internos (@event-hub/shared-types, @event-hub/internal-auth)
+        # Cada servicio los importa vía "dist/..." (ver sus package.json) —
+        # dist/ está gitignoreado (es build output), así que sin este paso
+        # el typecheck/test de CUALQUIER servicio falla con "Cannot find
+        # module '@event-hub/...'" en un checkout limpio.
+        run: pnpm --filter "@event-hub/shared-types" --filter "@event-hub/internal-auth" run build
+
       - name: prisma generate
         if: hashFiles(format('apps/{0}/prisma/schema.prisma', matrix.service)) != ''
         run: pnpm --filter "@event-hub/${{ matrix.service }}" run prisma:generate
@@ -69,10 +76,12 @@ jobs:
       - name: lint
         run: pnpm --filter "@event-hub/web" run lint
 
-      - name: typecheck
-        run: pnpm --filter "@event-hub/web" exec tsc --noEmit
-
       - name: build
+        # `next build` ya corre su propio typecheck ("Running TypeScript")
+        # DESPUÉS de generar los tipos ambiente de Next (ej. `LayoutProps`,
+        # en .next/types) — un `tsc --noEmit` suelto ANTES de esto falla en
+        # un checkout limpio porque esos tipos todavía no existen. Mismo
+        # criterio que admin-panel (`tsc -b` adentro de su propio `build`).
         run: pnpm --filter "@event-hub/web" run build
 
   admin-panel:
