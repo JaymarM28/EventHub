@@ -1,4 +1,5 @@
 import { BadRequestException, Body, Controller, Get, HttpCode, Param, Post, Query, Res } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { Response } from 'express';
 import { InternalHeaders, InternalUser, InternalUserContext, Public, RawInternalHeaders, Roles } from '@event-hub/internal-auth';
 import { OrdersService } from './orders.service';
@@ -16,6 +17,7 @@ export class OrdersController {
   constructor(
     private readonly ordersService: OrdersService,
     private readonly wompi: WompiClientService,
+    private readonly config: ConfigService,
   ) {}
 
   @Post('checkout')
@@ -102,9 +104,11 @@ export class OrdersController {
   @Public()
   async wompiCheckoutReturn(@Query('id') transactionId: string | undefined, @Res() res: Response) {
     let outcome: 'success' | 'failure' | 'pending' = 'pending';
+    let orderId: string | undefined;
     if (transactionId) {
       try {
         const transaction = await this.wompi.getTransaction(transactionId);
+        orderId = transaction.reference;
         if (transaction.status === 'APPROVED') outcome = 'success';
         else if (transaction.status === 'DECLINED' || transaction.status === 'VOIDED' || transaction.status === 'ERROR') {
           outcome = 'failure';
@@ -114,26 +118,50 @@ export class OrdersController {
         // va a llegar y confirmar el estado de la orden más tarde.
       }
     }
-    res.redirect(302, `/orders/checkout-return/${outcome}`);
+    // `orderId` viaja en la query (2026-10-01, versión web) para que
+    // checkoutReturn pueda reenviarlo a la app Flutter Web y retome el
+    // pedido exacto — la app nativa lo ignora (su WebView ya interceptó
+    // esta misma navegación ANTES de que el request llegue acá).
+    const orderIdQuery = orderId ? `?orderId=${encodeURIComponent(orderId)}` : '';
+    res.redirect(302, `/orders/checkout-return/${outcome}${orderIdQuery}`);
   }
 
   /**
-   * Páginas de aterrizaje del checkout — el WebView de la app detecta la
-   * navegación a esta URL por su path (`/orders/checkout-return/:outcome`)
-   * para saber cuándo cerrarse; el contenido HTML es solo para el caso de
-   * que alguien la vea manualmente en un navegador real.
+   * Páginas de aterrizaje del checkout — el WebView de la app NATIVA
+   * intercepta la navegación hacia esta URL por su path
+   * (`/orders/checkout-return/:outcome`) ANTES de que este request llegue
+   * a ejecutarse acá (ver payment_webview_screen.dart), así que lo que
+   * este handler responda es irrelevante para mobile. Para quien SÍ
+   * llega acá de verdad — un navegador real, ej. la versión web
+   * (2026-10-01, Next.js) — la página redirige sola de vuelta a
+   * `/checkout-return` con el resultado y el orderId, para que retome el
+   * pedido exacto.
    */
   @Get('checkout-return/:outcome')
   @Public()
-  checkoutReturn(@Param('outcome') outcome: string, @Res() res: Response) {
+  checkoutReturn(
+    @Param('outcome') outcome: string,
+    @Query('orderId') orderId: string | undefined,
+    @Res() res: Response,
+  ) {
     const page = CHECKOUT_RETURN_PAGES[outcome as keyof typeof CHECKOUT_RETURN_PAGES] ?? CHECKOUT_RETURN_PAGES.pending;
+    const webAppUrl = this.config.get<string>('WEB_APP_PUBLIC_URL');
+    const resumeParams = new URLSearchParams({ outcome, ...(orderId && { orderId }) });
+    // Next.js usa rutas normales (sin hash) — ver apps/web/src/app/checkout-return.
+    const resumeUrl = webAppUrl ? `${webAppUrl}/checkout-return?${resumeParams.toString()}` : null;
+
     res.type('html').send(`
 <!DOCTYPE html>
 <html lang="es">
-<head><meta charset="UTF-8" /><title>${page.title}</title></head>
+<head>
+  <meta charset="UTF-8" />
+  <title>${page.title}</title>
+  ${resumeUrl ? `<meta http-equiv="refresh" content="2;url=${resumeUrl}" />` : ''}
+</head>
 <body style="font-family: -apple-system, sans-serif; text-align: center; padding: 60px 20px; background: #faf9f6;">
   <h1 style="color:#1a1a1a;">${page.title}</h1>
   <p style="color:#555;">${page.message}</p>
+  ${resumeUrl ? `<p style="color:#555;">Si no volvés sola, <a href="${resumeUrl}">tocá acá</a>.</p>` : ''}
 </body>
 </html>
     `.trim());
