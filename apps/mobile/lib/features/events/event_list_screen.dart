@@ -108,13 +108,7 @@ class _EventListScreenState extends State<EventListScreen> {
               icon: const Icon(Icons.qr_code_scanner_rounded),
               onPressed: () => context.push('/scan'),
             ),
-          if (isAuthenticated)
-            IconButton(
-              icon: const Icon(Icons.person_outline_rounded),
-              tooltip: 'Perfil',
-              onPressed: () => context.push('/profile'),
-            )
-          else
+          if (!isAuthenticated)
             TextButton(
               onPressed: () => context.go('/login'),
               child: const Text('Ingresar'),
@@ -211,8 +205,16 @@ class _EventListScreenState extends State<EventListScreen> {
                         _filters.isEmpty &&
                         !_favoritesOnly &&
                         all.isNotEmpty;
-                    final featured = [...all]
-                      ..sort((a, b) => a.startsAt.compareTo(b.startsAt));
+                    // "Destacados" (pedido del usuario 2026-09-28): ordena
+                    // por popularidad real (boletos vendidos) primero: en
+                    // caso de empate (típicamente 0-0 mientras el evento es
+                    // nuevo/sin ventas) cae de vuelta al orden por fecha más
+                    // próxima, para que el carrusel nunca quede vacío.
+                    final featured = [...all]..sort((a, b) {
+                      final byPopularity = b.popularity.compareTo(a.popularity);
+                      if (byPopularity != 0) return byPopularity;
+                      return a.startsAt.compareTo(b.startsAt);
+                    });
 
                     return RefreshIndicator(
                       color: AppColors.accent,
@@ -248,7 +250,7 @@ class _EventListScreenState extends State<EventListScreen> {
                                   const SliverPadding(
                                     padding: EdgeInsets.fromLTRB(16, 4, 16, 10),
                                     sliver: SliverToBoxAdapter(
-                                      child: _SectionLabel('PRÓXIMOS'),
+                                      child: _SectionLabel('DESTACADOS'),
                                     ),
                                   ),
                                   SliverToBoxAdapter(

@@ -28,6 +28,18 @@ class ZoneModel {
       venueSectionId: json['venueSectionId'] as String?,
     );
   }
+
+  /// Boleto sin internet (2026-09-29) — round-trip local con
+  /// `shared_preferences`, no algo que el backend consuma de vuelta.
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'price': price,
+      'capacity': capacity,
+      'venueSectionId': venueSectionId,
+    };
+  }
 }
 
 class VenueSectionModel {
@@ -115,6 +127,7 @@ class EventModel {
     this.longitude,
     this.address,
     this.venueMap,
+    this.popularity = 0,
   });
 
   final String id;
@@ -150,6 +163,13 @@ class EventModel {
   /// tipeado por el organizador) — nullable, mismo criterio que lat/lng.
   final String? address;
 
+  /// Total de boletos vendidos entre todas las zonas — solo viene poblado
+  /// en el listado (GET /events, ver EventsService.findAll en
+  /// events-service), nunca en el detalle. Usado para elegir el carrusel
+  /// de "Destacados" (pedido del usuario 2026-09-28: automático por
+  /// popularidad, no por fecha más próxima).
+  final int popularity;
+
   factory EventModel.fromJson(Map<String, dynamic> json) {
     return EventModel(
       id: json['id'] as String,
@@ -172,7 +192,31 @@ class EventModel {
       longitude: (json['longitude'] as num?)?.toDouble(),
       address: json['address'] as String?,
       venueMap: VenueMapModel.fromEventJson(json),
+      popularity: (json['popularity'] as num?)?.toInt() ?? 0,
     );
+  }
+
+  /// Boleto sin internet (2026-09-29) — round-trip local con
+  /// `shared_preferences` (ver TicketsCache). `venueMap` queda afuera a
+  /// propósito: el caché offline solo necesita mostrar el QR del boleto,
+  /// nunca el mapa interactivo del establecimiento (eso sí exige red).
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'title': title,
+      'description': description,
+      'venue': venue,
+      'city': city,
+      'category': category?.apiValue,
+      'startsAt': startsAt.toIso8601String(),
+      'zones': zones.map((z) => z.toJson()).toList(),
+      'coverImageUrl': coverImageUrl,
+      'galleryImageUrls': galleryImageUrls,
+      'latitude': latitude,
+      'longitude': longitude,
+      'address': address,
+      'popularity': popularity,
+    };
   }
 }
 

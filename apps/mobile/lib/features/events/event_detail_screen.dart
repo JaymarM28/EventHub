@@ -25,11 +25,25 @@ class EventDetailScreen extends StatefulWidget {
 
 class _EventDetailScreenState extends State<EventDetailScreen> {
   late Future<EventModel> _future;
+  // Pedido del usuario 2026-09-28: cuando el evento tiene mucha info
+  // (galería, mapa, ubicación) llegar a "Zonas" exige scrollear todo el
+  // camino — este botón en el AppBar salta directo ahí desde arriba.
+  final _zonesKey = GlobalKey();
 
   @override
   void initState() {
     super.initState();
     _future = context.read<EventsRepository>().findOne(widget.eventId);
+  }
+
+  void _scrollToZones() {
+    final zonesContext = _zonesKey.currentContext;
+    if (zonesContext == null) return;
+    Scrollable.ensureVisible(
+      zonesContext,
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeInOut,
+    );
   }
 
   @override
@@ -67,6 +81,16 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
                 expandedHeight: 240,
                 stretch: true,
                 actions: [
+                  if (event.zones.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: IconButton(
+                        icon: const Icon(Icons.confirmation_number_outlined),
+                        color: Colors.white,
+                        tooltip: 'Ir a comprar',
+                        onPressed: _scrollToZones,
+                      ),
+                    ),
                   Padding(
                     padding: const EdgeInsets.only(right: 12, top: 4),
                     child: FavoriteButton(eventId: event.id, dark: true),
@@ -242,6 +266,7 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
                     const SizedBox(height: 28),
                     Text(
                       'Zonas',
+                      key: _zonesKey,
                       style: Theme.of(context).textTheme.headlineMedium,
                     ),
                     const SizedBox(height: 12),
