@@ -79,6 +79,12 @@ model Event {
   /// existe hoy, y un timestamp nullable ya responde "¿está cancelado?" Y
   /// "¿desde cuándo?" sin una migración de datos para los eventos viejos.
   cancelledAt DateTime?
+  /// Notificaciones push (2026-09-29): cuándo se publicó el recordatorio
+  /// "tu evento es pronto" (null = todavía no) — ver EventRemindersService.
+  /// Sin esto, un mismo evento podría notificarse más de una vez si el
+  /// cron corre más de una vez dentro de la ventana de 23-25h antes del
+  /// evento (ej. tras un reinicio del servicio).
+  reminderSentAt DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

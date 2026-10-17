@@ -7,6 +7,7 @@ import { Prisma } from '../../generated/prisma-client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { DomainEventsPublisher } from '../messaging/domain-events.publisher';
+import { WaitlistService } from '../waitlist/waitlist.service';
 import { AuthClientService } from './auth-client.service';
 
 export interface OrderPaidPayload {
@@ -41,6 +42,7 @@ export class TicketsService {
     private readonly redis: RedisService,
     private readonly publisher: DomainEventsPublisher,
     private readonly authClient: AuthClientService,
+    private readonly waitlistService: WaitlistService,
     config: ConfigService,
   ) {
     this.qrSecret = config.getOrThrow<string>('TICKET_QR_SECRET');
@@ -122,7 +124,9 @@ export class TicketsService {
         throw new Error(`Zona ${payload.zoneId} no encontrada — no se puede emitir el boleto`);
       }
 
-      const confirmedCount = await tx.ticket.count({ where: { zoneId: payload.zoneId } });
+      // #22/#11 — mismo fix que ReservationsService.reserve: un reembolso
+      // debe liberar cupo de verdad.
+      const confirmedCount = await tx.ticket.count({ where: { zoneId: payload.zoneId, refundedAt: null } });
       if (confirmedCount + payload.quantity > zone.capacity) {
         // No debería pasar nunca si el soft hold de Redis funcionó bien —
         // se trata como caso crítico: se cobró y no hay cupo para los
@@ -232,10 +236,18 @@ export class TicketsService {
    * simplemente no encuentra filas que actualizar.
    */
   async refundByOrder(orderId: string): Promise<void> {
-    await this.prisma.ticket.updateMany({
+    const result = await this.prisma.ticket.updateMany({
       where: { orderId, refundedAt: null },
       data: { refundedAt: new Date() },
     });
+    if (result.count === 0) return; // redelivery del mismo evento — ya procesado
+
+    // #11 — todos los boletos de UNA orden son de la MISMA zona (una orden
+    // nunca mezcla zonas), así que alcanza con resolverla de cualquiera.
+    const sample = await this.prisma.ticket.findFirst({ where: { orderId }, select: { zoneId: true } });
+    if (sample) {
+      await this.waitlistService.notifyFreedSlots(sample.zoneId, result.count);
+    }
   }
 
   /**

@@ -92,3 +92,21 @@ model ProcessedEvent {
 
   @@map("processed_events")
 }
+
+/// Lista de espera (#11, 2026-09-30) — un comprador se anota cuando una
+/// zona está agotada; `notifiedAt` se completa cuando un reembolso libera
+/// cupo y le toca el turno (ver WaitlistService.notifyFreedSlots), en
+/// orden FIFO por `createdAt`. Sin "hold" reservado para esta persona
+/// específica en esta v1 (decisión de simplicidad) — el aviso le da la
+/// MISMA oportunidad de comprar que cualquiera, solo que se entera primero.
+model WaitlistEntry {
+  id         String    @id @default(uuid())
+  zoneId     String
+  userId     String
+  createdAt  DateTime  @default(now())
+  notifiedAt DateTime?
+
+  @@unique([zoneId, userId])
+  @@index([zoneId, notifiedAt])
+  @@map("waitlist_entries")
+}

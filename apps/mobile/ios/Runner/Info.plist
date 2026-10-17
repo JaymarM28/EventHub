@@ -64,6 +64,14 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<!-- Notificaciones push (2026-09-30) — permite que la app reciba un
+	     push y lo procese (ej. actualizar algo en segundo plano) sin que el
+	     usuario la haya abierto; FirebaseMessaging lo necesita para
+	     entregar pushes "silenciosos"/de datos además de los visibles. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

@@ -251,6 +251,31 @@ describe('EventsService', () => {
         orderBy: { startsAt: 'asc' },
       });
     });
+
+    it('agrega `popularity` = total vendido entre todas las zonas del evento', async () => {
+      prisma.event.findMany.mockResolvedValue([
+        {
+          id: 'event-1',
+          zones: [{ id: 'zone-1' }, { id: 'zone-2' }],
+        },
+        {
+          id: 'event-2',
+          zones: [{ id: 'zone-3' }],
+        },
+      ]);
+      ticketsClient.soldCountByZone.mockResolvedValue([
+        { zoneId: 'zone-1', sold: 10 },
+        { zoneId: 'zone-2', sold: 5 },
+      ]);
+
+      const result = await service.findAll();
+
+      expect(ticketsClient.soldCountByZone).toHaveBeenCalledWith(['zone-1', 'zone-2', 'zone-3']);
+      expect(result).toEqual([
+        expect.objectContaining({ id: 'event-1', popularity: 15 }),
+        expect.objectContaining({ id: 'event-2', popularity: 0 }),
+      ]);
+    });
   });
 
   describe('findOne', () => {

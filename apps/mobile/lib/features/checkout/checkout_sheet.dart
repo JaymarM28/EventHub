@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/auth_state.dart';
+import '../../core/nav_return.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/pressable_button.dart';
 import '../events/event_models.dart';
@@ -11,6 +12,7 @@ import '../tickets/ticket_screen.dart';
 import '../tickets/tickets_repository.dart';
 import 'orders_repository.dart';
 import 'payment_webview_screen.dart';
+import 'waitlist_repository.dart';
 
 enum _Status { idle, creatingOrder, awaitingPayment, waitingTickets, error }
 
@@ -18,6 +20,15 @@ enum _Status { idle, creatingOrder, awaitingPayment, waitingTickets, error }
 /// CreateOrderDto en orders-service; UI y backend validan lo mismo por
 /// separado a propósito (la UI nunca es la única barrera).
 const _maxQuantityPerOrder = 10;
+
+/// #24 (modelo de negocio) — SOLO para mostrar un estimado antes de
+/// comprar; debe reflejar el mismo valor que `SERVICE_FEE_RATE` en
+/// orders-service, pero el monto real cobrado lo calcula el backend
+/// (`OrdersService.checkout`), nunca este valor. Mismo criterio que el
+/// "Total" de acá abajo ya tenía antes de este cambio: es una vista previa,
+/// no descuenta el código promocional tampoco (eso también se resuelve
+/// recién en el backend).
+const _serviceFeeRateEstimate = 0.10;
 
 /// Sheet de confirmación de compra. Se cierra con `Navigator.pop(tickets)`
 /// cuando la compra + emisión de TODOS los boletos termina bien (Fase A:
@@ -43,6 +54,11 @@ class CheckoutSheet extends StatefulWidget {
 class _CheckoutSheetState extends State<CheckoutSheet> {
   _Status _status = _Status.idle;
   String? _error;
+  // #11 (2026-09-30) — cuando el error es "zona agotada", se ofrece
+  // anotarse a la lista de espera en vez de un simple "Reintentar" que
+  // siempre va a fallar igual mientras la zona siga sin cupo.
+  bool _soldOut = false;
+  bool _joiningWaitlist = false;
   late int _quantity = widget.seatIds?.length ?? 1;
   final _discountCodeController = TextEditingController();
 
@@ -65,6 +81,7 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
     setState(() {
       _status = _Status.creatingOrder;
       _error = null;
+      _soldOut = false;
     });
     final ordersRepository = context.read<OrdersRepository>();
     final ticketsRepository = context.read<TicketsRepository>();
@@ -131,6 +148,10 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
       setState(() {
         _status = _Status.error;
         _error = e.message;
+        // Backend: "Zona agotada" / "Zona agotada (reservas activas en
+        // curso)" (ReservationsService.reserve) — ambas significan "no hay
+        // cupo ahora mismo", el único caso donde la lista de espera aplica.
+        _soldOut = e.message.contains('agotada');
       });
     } on TicketNotReadyException catch (e) {
       if (!mounted) return;
@@ -141,13 +162,38 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
     }
   }
 
+  /// #11 — anota al comprador y cierra el sheet (no hay nada más que hacer
+  /// acá: el aviso de "se liberó un cupo" llega después, por notificación,
+  /// cuando a alguien le toque el turno — ver WaitlistService en el backend).
+  Future<void> _joinWaitlist() async {
+    setState(() => _joiningWaitlist = true);
+    try {
+      await context.read<WaitlistRepository>().join(widget.zone.id);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Te anotamos en la lista de espera — te avisamos si se libera un cupo'),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _joiningWaitlist = false;
+        _error = 'No se pudo anotar en la lista de espera — intentá de nuevo';
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final busy =
         _status == _Status.creatingOrder ||
         _status == _Status.awaitingPayment ||
         _status == _Status.waitingTickets;
-    final total = widget.zone.price * _quantity;
+    final subtotal = widget.zone.price * _quantity;
+    final serviceFeeEstimate = subtotal * _serviceFeeRateEstimate;
+    final totalEstimate = subtotal + serviceFeeEstimate;
     return Padding(
       padding: EdgeInsets.only(
         left: 24,
@@ -211,10 +257,39 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
           const SizedBox(height: 16),
           Row(
             children: [
+              Text('Subtotal', style: Theme.of(context).textTheme.bodyMedium),
+              const Spacer(),
+              Text(
+                '\$${subtotal.toStringAsFixed(0)}',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Text(
+                'Cargo por servicio',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: AppColors.inkSoft),
+              ),
+              const Spacer(),
+              Text(
+                '\$${serviceFeeEstimate.toStringAsFixed(0)}',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: AppColors.inkSoft),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
               Text('Total', style: Theme.of(context).textTheme.bodyLarge),
               const Spacer(),
               Text(
-                '\$${total.toStringAsFixed(0)}',
+                '\$${totalEstimate.toStringAsFixed(0)}',
                 style: const TextStyle(
                   color: AppColors.accent,
                   fontSize: 24,
@@ -254,9 +329,15 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
           ],
           const SizedBox(height: 24),
           PressableButton(
-            onPressed: busy ? null : _buy,
-            loading: busy,
-            child: Text(_status == _Status.error ? 'Reintentar' : 'Comprar'),
+            onPressed: busy || _joiningWaitlist
+                ? null
+                : (_soldOut ? _joinWaitlist : _buy),
+            loading: busy || _joiningWaitlist,
+            child: Text(
+              _soldOut
+                  ? 'Unirme a la lista de espera'
+                  : (_status == _Status.error ? 'Reintentar' : 'Comprar'),
+            ),
           ),
         ],
       ),
@@ -363,7 +444,8 @@ Future<void> buyZone(
   List<String>? seatIds,
 }) async {
   if (context.read<AuthState>().status != AuthStatus.authenticated) {
-    context.push('/login');
+    final from = GoRouterState.of(context).uri.toString();
+    context.push(withFromParam('/login', from));
     return;
   }
   final tickets = await showCheckoutSheet(context, event: event, zone: zone, seatIds: seatIds);

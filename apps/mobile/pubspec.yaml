@@ -82,6 +82,14 @@ dependencies:
   # "Abrir en Maps" desde el detalle del evento — deep link a la app nativa
   # de mapas del dispositivo, no un mapa embebido de navegación.
   url_launcher: ^6.3.1
+  # Notificaciones push (2026-09-29) — FCM cubre iOS (vía su puente a APNs)
+  # y Android con una sola API, ver PushNotificationsService. Requiere
+  # `flutterfire configure` (genera lib/firebase_options.dart + los
+  # archivos de config nativos) antes de que esto compile/funcione de
+  # verdad — ver el comentario en PushNotificationsService para la lista
+  # completa de pasos manuales pendientes en la consola de Firebase.
+  firebase_core: ^3.8.0
+  firebase_messaging: ^15.1.6
 
 dev_dependencies:
   flutter_test:

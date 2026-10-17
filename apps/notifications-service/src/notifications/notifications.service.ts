@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersClientService } from './users-client.service';
 import { EmailService } from './email.service';
+import { PushService } from './push.service';
 import { renderEmailHtml } from './email-template';
 
 /**
@@ -26,14 +27,23 @@ export class NotificationsService {
     private readonly prisma: PrismaService,
     private readonly usersClient: UsersClientService,
     private readonly emailService: EmailService,
+    private readonly pushService: PushService,
   ) {}
 
+  /**
+   * `pushBody` es texto plano (a diferencia de `body`, que es HTML para el
+   * email) — separado en vez de derivarlo con un strip-HTML frágil, así
+   * cada notificación controla exactamente qué muestra el push. Default al
+   * subject si no se pasa nada (algunas notificaciones no necesitan un
+   * segundo texto).
+   */
   async notify(
     eventId: string,
     eventType: string,
     userId: string,
     subject: string,
     body: string,
+    pushBody?: string,
   ): Promise<void> {
     const alreadyProcessed = await this.prisma.processedEvent.findUnique({
       where: { eventId },
@@ -45,6 +55,13 @@ export class NotificationsService {
 
     const recipient = await this.usersClient.findById(userId);
     await this.emailService.send(recipient.email, subject, renderEmailHtml(subject, body));
+
+    // Best-effort a propósito (a diferencia del email de arriba): un token
+    // de push vencido es normal y NO debe frenar la idempotencia ni dejar
+    // de mandar el email — ver PushService.sendToUser.
+    await this.pushService.sendToUser(userId, subject, pushBody ?? subject).catch((err) => {
+      this.logger.warn(`Push a ${userId} falló (no bloquea el email): ${(err as Error).message}`);
+    });
 
     await this.prisma.$transaction([
       this.prisma.notification.create({

@@ -102,7 +102,17 @@ export class EventsService {
    * — sin ninguno, se comporta igual que antes. `maxPrice` filtra por
    * "tiene alguna zona a ese precio o menos" (ver comentario del DTO).
    */
-  findAll(query: FindEventsQueryDto = {}) {
+  /**
+   * `popularity` (pedido del usuario 2026-09-28: el carrusel de destacados
+   * de la app debe ordenar por popularidad real, no solo por fecha más
+   * próxima) = total de boletos vendidos entre todas las zonas del evento.
+   * Reusa `TicketsClientService.soldCountByZone` (ya existente para el
+   * dashboard del organizador) con UN solo request batcheado para todos
+   * los eventos del listado, en vez de uno por evento. Mismo criterio de
+   * "no crítico" que el dashboard: si tickets-service no responde, todos
+   * quedan en popularity 0 (el mobile cae de vuelta a orden por fecha).
+   */
+  async findAll(query: FindEventsQueryDto = {}) {
     const where: Prisma.EventWhereInput = {
       ...(query.city && { city: { equals: query.city, mode: 'insensitive' } }),
       ...(query.category && { category: query.category }),
@@ -117,11 +127,20 @@ export class EventsService {
       }),
     };
 
-    return this.prisma.event.findMany({
+    const events = await this.prisma.event.findMany({
       where,
       include: { zones: true },
       orderBy: { startsAt: 'asc' },
     });
+
+    const zoneIds = events.flatMap((event) => event.zones.map((z) => z.id));
+    const sales = await this.ticketsClient.soldCountByZone(zoneIds);
+    const soldByZone = new Map(sales.map((s) => [s.zoneId, s.sold]));
+
+    return events.map((event) => ({
+      ...event,
+      popularity: event.zones.reduce((sum, z) => sum + (soldByZone.get(z.id) ?? 0), 0),
+    }));
   }
 
   findByOrganizer(organizerId: string) {

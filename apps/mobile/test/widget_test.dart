@@ -12,6 +12,7 @@ import 'package:mobile/core/token_storage.dart';
 import 'package:mobile/features/access/access_repository.dart';
 import 'package:mobile/features/auth/auth_repository.dart';
 import 'package:mobile/features/checkout/orders_repository.dart';
+import 'package:mobile/features/checkout/waitlist_repository.dart';
 import 'package:mobile/features/events/events_repository.dart';
 import 'package:mobile/features/events/favorites_state.dart';
 import 'package:mobile/features/tickets/tickets_repository.dart';
@@ -111,6 +112,7 @@ void main() {
     final eventsRepository = EventsRepository(apiClient);
     final ordersRepository = OrdersRepository(apiClient);
     final ticketsRepository = TicketsRepository(apiClient);
+    final waitlistRepository = WaitlistRepository(apiClient);
     final accessRepository = AccessRepository(apiClient);
     final favoritesState = FavoritesState();
     final router = buildRouter(authState);
@@ -121,6 +123,7 @@ void main() {
         eventsRepository: eventsRepository,
         ordersRepository: ordersRepository,
         ticketsRepository: ticketsRepository,
+        waitlistRepository: waitlistRepository,
         accessRepository: accessRepository,
         favoritesState: favoritesState,
         router: router,
@@ -136,7 +139,9 @@ void main() {
     // El único evento de prueba aparece dos veces a propósito: una en el
     // carrusel "Próximos" (DESIGN.md #38) y otra en "Todos los eventos" —
     // no es una card duplicada por error, es la misma UI con dos vistas.
-    expect(find.text('Eventos'), findsOneWidget);
+    // "Eventos" aparece dos veces desde la barra de navegación inferior
+    // (2026-09-28): una en el AppBar y otra como label de la tab activa.
+    expect(find.text('Eventos'), findsNWidgets(2));
     expect(find.text('Evento de prueba'), findsNWidgets(2));
     expect(find.text('Lugar de prueba'), findsNWidgets(2));
   });

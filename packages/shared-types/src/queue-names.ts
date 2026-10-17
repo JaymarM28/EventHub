@@ -14,6 +14,16 @@ export const EVENT_TYPES = {
   ORDER_PAID: 'order.paid',
   ORDER_REFUNDED: 'order.refunded', // fase stretch
   TICKET_ISSUED: 'ticket.issued',
+  /// Notificaciones push (2026-09-29): events-service dispara esto vía un
+  /// cron cuando un evento está por empezar (ver events-service/src/events/
+  /// event-reminders.service.ts) — notifications-service lo consume para
+  /// avisarle a cada comprador, resolviendo la lista vía orders-service.
+  EVENT_REMINDER_DUE: 'event.reminder-due',
+  /// Lista de espera (#11, 2026-09-30): tickets-service lo publica, uno
+  /// por persona, cuando un reembolso libera cupo en una zona agotada (ver
+  /// WaitlistService.notifyFreedSlots) — notifications-service lo consume
+  /// para avisarle a cada uno.
+  WAITLIST_SLOT_AVAILABLE: 'waitlist.slot-available',
 } as const;
 
 export function queueFor(consumerService: string): string {

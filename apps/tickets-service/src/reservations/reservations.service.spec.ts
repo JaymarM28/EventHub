@@ -79,6 +79,18 @@ describe('ReservationsService', () => {
     expect(redis.tryReserve).not.toHaveBeenCalled();
   });
 
+  it('GARANTÍA #11: un boleto reembolsado libera cupo real (no cuenta como confirmado)', async () => {
+    prisma.eventZone.findUnique.mockResolvedValue({ id: 'zone-1', capacity: 5, price: '50', currency: 'COP' });
+    prisma.ticket.count.mockResolvedValue(4); // 5 emitidos, 1 reembolsado -> el mock ya refleja el filtro
+    redis.tryReserve.mockResolvedValue({ reservationId: 'res-1', expiresAt: 123 });
+
+    await service.reserve('zone-1', 'user-1', 1);
+
+    expect(prisma.ticket.count).toHaveBeenCalledWith({
+      where: { zoneId: 'zone-1', refundedAt: null },
+    });
+  });
+
   it('reserva exitosamente cuando hay cupo y Redis acepta, incluyendo precio unitario y moneda de la zona', async () => {
     prisma.eventZone.findUnique.mockResolvedValue({ id: 'zone-1', capacity: 5, price: '50', currency: 'COP' });
     prisma.ticket.count.mockResolvedValue(2);

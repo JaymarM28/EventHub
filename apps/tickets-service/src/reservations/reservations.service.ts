@@ -35,7 +35,11 @@ export class ReservationsService {
       throw new NotFoundException(`Zona ${zoneId} no encontrada`);
     }
 
-    const confirmedCount = await this.prisma.ticket.count({ where: { zoneId } });
+    // #22/#11 — un boleto reembolsado NO debe seguir ocupando cupo (bug
+    // real encontrado al construir la lista de espera: sin este filtro,
+    // una zona reembolsada quedaba "agotada" para siempre, aunque el cupo
+    // ya estaba libre de verdad).
+    const confirmedCount = await this.prisma.ticket.count({ where: { zoneId, refundedAt: null } });
     const maxAvailable = zone.capacity - confirmedCount;
 
     if (maxAvailable < quantity) {

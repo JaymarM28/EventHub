@@ -7,13 +7,16 @@ import 'package:provider/provider.dart';
 import 'app_router.dart';
 import 'core/api_client.dart';
 import 'core/auth_state.dart';
+import 'core/push_notifications_service.dart';
 import 'core/theme/app_theme.dart';
 import 'core/token_storage.dart';
 import 'features/access/access_repository.dart';
 import 'features/auth/auth_repository.dart';
 import 'features/checkout/orders_repository.dart';
+import 'features/checkout/waitlist_repository.dart';
 import 'features/events/events_repository.dart';
 import 'features/events/favorites_state.dart';
+import 'features/notifications/notifications_repository.dart';
 import 'features/tickets/tickets_repository.dart';
 
 Future<void> main() async {
@@ -40,10 +43,31 @@ Future<void> main() async {
   authState = AuthState(authRepository);
   final eventsRepository = EventsRepository(apiClient);
   final ordersRepository = OrdersRepository(apiClient);
+  final waitlistRepository = WaitlistRepository(apiClient);
   final ticketsRepository = TicketsRepository(apiClient);
   final accessRepository = AccessRepository(apiClient);
   final favoritesState = FavoritesState();
   final router = buildRouter(authState);
+
+  // Notificaciones push (2026-09-29) — se registra/da de baja el token de
+  // FCM en las transiciones de sesión (login/register → registrar; logout
+  // → dar de baja), incluida la transición que dispara `bootstrap()` si ya
+  // había sesión guardada al abrir la app. Ver PushNotificationsService
+  // para los pasos manuales de Firebase que siguen pendientes.
+  final notificationsRepository = NotificationsRepository(apiClient);
+  final pushNotifications = PushNotificationsService(notificationsRepository);
+  await pushNotifications.initialize();
+  AuthStatus previousAuthStatus = AuthStatus.unknown;
+  authState.addListener(() {
+    if (authState.status == AuthStatus.authenticated &&
+        previousAuthStatus != AuthStatus.authenticated) {
+      pushNotifications.registerIfPermitted();
+    } else if (authState.status == AuthStatus.unauthenticated &&
+        previousAuthStatus == AuthStatus.authenticated) {
+      pushNotifications.unregister();
+    }
+    previousAuthStatus = authState.status;
+  });
 
   authState.bootstrap();
   favoritesState.load();
@@ -54,6 +78,7 @@ Future<void> main() async {
       eventsRepository: eventsRepository,
       ordersRepository: ordersRepository,
       ticketsRepository: ticketsRepository,
+      waitlistRepository: waitlistRepository,
       accessRepository: accessRepository,
       favoritesState: favoritesState,
       router: router,
@@ -68,6 +93,7 @@ class EventHubApp extends StatelessWidget {
     required this.eventsRepository,
     required this.ordersRepository,
     required this.ticketsRepository,
+    required this.waitlistRepository,
     required this.accessRepository,
     required this.favoritesState,
     required this.router,
@@ -77,6 +103,7 @@ class EventHubApp extends StatelessWidget {
   final EventsRepository eventsRepository;
   final OrdersRepository ordersRepository;
   final TicketsRepository ticketsRepository;
+  final WaitlistRepository waitlistRepository;
   final AccessRepository accessRepository;
   final FavoritesState favoritesState;
   final GoRouter router;
@@ -89,6 +116,7 @@ class EventHubApp extends StatelessWidget {
         Provider.value(value: eventsRepository),
         Provider.value(value: ordersRepository),
         Provider.value(value: ticketsRepository),
+        Provider.value(value: waitlistRepository),
         Provider.value(value: accessRepository),
         ChangeNotifierProvider.value(value: favoritesState),
       ],

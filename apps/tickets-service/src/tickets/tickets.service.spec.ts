@@ -5,6 +5,7 @@ import { TicketsService } from './tickets.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { DomainEventsPublisher } from '../messaging/domain-events.publisher';
+import { WaitlistService } from '../waitlist/waitlist.service';
 import { AuthClientService } from './auth-client.service';
 import { Prisma } from '../../generated/prisma-client';
 
@@ -18,6 +19,7 @@ describe('TicketsService', () => {
       updateMany: jest.Mock;
       findUnique: jest.Mock;
       findUniqueOrThrow: jest.Mock;
+      findFirst: jest.Mock;
       findMany: jest.Mock;
       groupBy: jest.Mock;
       update: jest.Mock;
@@ -33,6 +35,7 @@ describe('TicketsService', () => {
   let redis: { release: jest.Mock; releaseSeats: jest.Mock };
   let publisher: { publish: jest.Mock };
   let authClient: { findByEmail: jest.Mock };
+  let waitlistService: { notifyFreedSlots: jest.Mock };
 
   const payload = {
     orderId: 'order-1',
@@ -56,6 +59,7 @@ describe('TicketsService', () => {
         updateMany: jest.fn(),
         findUnique: jest.fn(),
         findUniqueOrThrow: jest.fn(),
+        findFirst: jest.fn(),
         findMany: jest.fn(),
         groupBy: jest.fn(),
         update: jest.fn(),
@@ -66,6 +70,7 @@ describe('TicketsService', () => {
     redis = { release: jest.fn().mockResolvedValue(undefined), releaseSeats: jest.fn().mockResolvedValue(undefined) };
     publisher = { publish: jest.fn().mockResolvedValue(undefined) };
     authClient = { findByEmail: jest.fn() };
+    waitlistService = { notifyFreedSlots: jest.fn().mockResolvedValue(undefined) };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -74,6 +79,7 @@ describe('TicketsService', () => {
         { provide: RedisService, useValue: redis },
         { provide: DomainEventsPublisher, useValue: publisher },
         { provide: AuthClientService, useValue: authClient },
+        { provide: WaitlistService, useValue: waitlistService },
         {
           provide: ConfigService,
           useValue: { getOrThrow: () => 'test-qr-secret' },
@@ -118,6 +124,11 @@ describe('TicketsService', () => {
       'ticket.issued',
       expect.objectContaining({ orderId: 'order-1', userId: 'user-1' }),
     );
+    // GARANTÍA #11: un boleto reembolsado no debe contar como cupo
+    // ocupado — bug real encontrado al construir la lista de espera.
+    expect(tx.ticket.count).toHaveBeenCalledWith({
+      where: { zoneId: 'zone-1', refundedAt: null },
+    });
   });
 
   it('Fase A: crea un ticket por cada unidad de `quantity`, todos con el mismo orderId, y publica un ticket.issued por cada uno', async () => {
@@ -421,6 +432,7 @@ describe('TicketsService', () => {
   describe('refundByOrder', () => {
     it('marca refundedAt en los boletos de la orden que todavía no estaban reembolsados', async () => {
       prisma.ticket.updateMany.mockResolvedValue({ count: 2 });
+      prisma.ticket.findFirst.mockResolvedValue({ zoneId: 'zone-1' });
 
       await service.refundByOrder('order-1');
 
@@ -428,6 +440,24 @@ describe('TicketsService', () => {
         where: { orderId: 'order-1', refundedAt: null },
         data: { refundedAt: expect.any(Date) },
       });
+    });
+
+    it('#11: avisa a la lista de espera de la zona por la cantidad liberada', async () => {
+      prisma.ticket.updateMany.mockResolvedValue({ count: 2 });
+      prisma.ticket.findFirst.mockResolvedValue({ zoneId: 'zone-1' });
+
+      await service.refundByOrder('order-1');
+
+      expect(waitlistService.notifyFreedSlots).toHaveBeenCalledWith('zone-1', 2);
+    });
+
+    it('redelivery del mismo evento (count 0): no vuelve a avisar a la lista de espera', async () => {
+      prisma.ticket.updateMany.mockResolvedValue({ count: 0 });
+
+      await service.refundByOrder('order-1');
+
+      expect(prisma.ticket.findFirst).not.toHaveBeenCalled();
+      expect(waitlistService.notifyFreedSlots).not.toHaveBeenCalled();
     });
   });
 

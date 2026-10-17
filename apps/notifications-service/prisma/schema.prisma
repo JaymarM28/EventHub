@@ -37,3 +37,20 @@ model ProcessedEvent {
 
   @@map("processed_events")
 }
+
+/// Notificaciones push (2026-09-29) — un usuario puede tener más de un
+/// dispositivo registrado (celular + tablet), así que NO es único por
+/// userId, solo por `token` (re-registrar el mismo token, ej. reinstalar
+/// la app, actualiza en vez de duplicar). `platform` es solo informativo
+/// (diagnóstico) — firebase-admin no lo necesita para enviar.
+model DeviceToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  platform  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("device_tokens")
+}

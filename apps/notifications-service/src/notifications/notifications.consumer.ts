@@ -3,6 +3,7 @@ import { Ctx, EventPattern, Payload, RmqContext } from '@nestjs/microservices';
 import { EVENT_TYPES, EventEnvelope } from '@event-hub/shared-types';
 import { NotificationsService } from './notifications.service';
 import { EventsClientService } from './events-client.service';
+import { OrdersClientService } from './orders-client.service';
 import { renderTicketDetails } from './email-template';
 
 interface OrderPaidPayload {
@@ -15,6 +16,28 @@ interface OrderPaidPayload {
 interface TicketIssuedPayload {
   ticketId: string;
   orderId: string;
+  userId: string;
+  zoneId: string;
+}
+
+interface OrderRefundedPayload {
+  orderId: string;
+  userId: string;
+  zoneId: string;
+  quantity: number;
+}
+
+interface EventReminderDuePayload {
+  id: string;
+  title: string;
+  venue: string;
+  city: string | null;
+  startsAt: string;
+  currency: string;
+  zoneIds: string[];
+}
+
+interface WaitlistSlotAvailablePayload {
   userId: string;
   zoneId: string;
 }
@@ -33,6 +56,7 @@ export class NotificationsConsumer {
   constructor(
     private readonly notifications: NotificationsService,
     private readonly eventsClient: EventsClientService,
+    private readonly ordersClient: OrdersClientService,
   ) {}
 
   /**
@@ -71,6 +95,7 @@ export class NotificationsConsumer {
           totalAmount,
           currency: zone.currency,
         }),
+        `Tu pago de ${zone.eventTitle} se confirmó — tu boleto está en camino.`,
       );
 
       await this.notifications.notify(
@@ -106,6 +131,87 @@ export class NotificationsConsumer {
           totalAmount: zone.zonePrice,
           currency: zone.currency,
         }),
+        `Ya podés ver tu boleto para ${zone.eventTitle}.`,
+      );
+    });
+  }
+
+  /** #22/#24 — a diferencia de order.paid, acá NO hace falta resolver la
+   * zona para el organizador (el reembolso no le manda aviso a él, solo al
+   * comprador que recuperó su plata). */
+  @EventPattern(EVENT_TYPES.ORDER_REFUNDED)
+  async handleOrderRefunded(
+    @Payload() envelope: EventEnvelope<OrderRefundedPayload>,
+    @Ctx() context: RmqContext,
+  ) {
+    await this.handle(context, envelope, async () => {
+      const zone = await this.eventsClient.findZoneWithOrganizer(envelope.payload.zoneId);
+
+      await this.notifications.notify(
+        envelope.eventId,
+        envelope.type,
+        envelope.payload.userId,
+        'Te reembolsamos tu compra',
+        `<p style="margin:0;font-size:15px;color:#444;">Te devolvimos el pago de ${envelope.payload.quantity} ${envelope.payload.quantity === 1 ? 'boleto' : 'boletos'} de <strong>${zone.eventTitle}</strong> — el dinero vuelve al medio de pago con el que compraste.</p>`,
+        `Te reembolsamos tu compra de ${zone.eventTitle}.`,
+      );
+    });
+  }
+
+  /** Notificaciones push (2026-09-29) — a diferencia de order.paid/
+   * ticket.issued (un comprador específico en el payload), acá el payload
+   * trae el EVENTO, no compradores — hay que resolverlos acá contra
+   * orders-service (ver OrdersClientService) y notificar a cada uno con su
+   * propia clave de idempotencia (mismo criterio que buyer/organizer de
+   * order.paid: `ProcessedEvent` es por-eventId, así que compartir uno
+   * entre varios compradores dejaría a todos menos el primero sin avisar). */
+  @EventPattern(EVENT_TYPES.EVENT_REMINDER_DUE)
+  async handleEventReminderDue(
+    @Payload() envelope: EventEnvelope<EventReminderDuePayload>,
+    @Ctx() context: RmqContext,
+  ) {
+    await this.handle(context, envelope, async () => {
+      const { title, venue, city, startsAt, zoneIds } = envelope.payload;
+      const buyerIds = await this.ordersClient.findBuyerIdsByZones(zoneIds);
+      const dateLabel = new Intl.DateTimeFormat('es-CO', {
+        dateStyle: 'full',
+        timeStyle: 'short',
+        timeZone: 'America/Bogota',
+      }).format(new Date(startsAt));
+      const locationLabel = city ? `${venue}, ${city}` : venue;
+
+      for (const userId of buyerIds) {
+        await this.notifications.notify(
+          `${envelope.eventId}:${userId}`,
+          envelope.type,
+          userId,
+          `${title} es mañana`,
+          `<p style="margin:0;font-size:15px;color:#444;">Tu evento <strong>${title}</strong> es el ${dateLabel} en ${locationLabel} — ¡no te lo pierdas!</p>`,
+          `${title} es mañana en ${locationLabel}.`,
+        );
+      }
+    });
+  }
+
+  /** #11 (2026-09-30) — un aviso por persona (ya viene así, uno por
+   * publish, ver WaitlistService.notifyFreedSlots), así que `envelope.eventId`
+   * alcanza como clave de idempotencia sin necesitar sufijo (a diferencia
+   * de order.paid buyer/organizer o el recordatorio de evento). */
+  @EventPattern(EVENT_TYPES.WAITLIST_SLOT_AVAILABLE)
+  async handleWaitlistSlotAvailable(
+    @Payload() envelope: EventEnvelope<WaitlistSlotAvailablePayload>,
+    @Ctx() context: RmqContext,
+  ) {
+    await this.handle(context, envelope, async () => {
+      const zone = await this.eventsClient.findZoneWithOrganizer(envelope.payload.zoneId);
+
+      await this.notifications.notify(
+        envelope.eventId,
+        envelope.type,
+        envelope.payload.userId,
+        '¡Se liberó un cupo!',
+        `<p style="margin:0;font-size:15px;color:#444;">Se liberó un cupo en "${zone.zoneName}" para <strong>${zone.eventTitle}</strong> — comprá antes de que se agote de nuevo.</p>`,
+        `Se liberó un cupo en ${zone.eventTitle} — ¡corré a comprarlo!`,
       );
     });
   }

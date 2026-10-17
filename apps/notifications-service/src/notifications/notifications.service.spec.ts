@@ -3,6 +3,7 @@ import { NotificationsService } from './notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersClientService } from './users-client.service';
 import { EmailService } from './email.service';
+import { PushService } from './push.service';
 
 describe('NotificationsService', () => {
   let service: NotificationsService;
@@ -13,6 +14,7 @@ describe('NotificationsService', () => {
   };
   let usersClient: { findById: jest.Mock };
   let emailService: { send: jest.Mock };
+  let pushService: { sendToUser: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
@@ -22,6 +24,7 @@ describe('NotificationsService', () => {
     };
     usersClient = { findById: jest.fn().mockResolvedValue({ id: 'user-1', email: 'user1@example.com' }) };
     emailService = { send: jest.fn().mockResolvedValue(undefined) };
+    pushService = { sendToUser: jest.fn().mockResolvedValue(undefined) };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -29,6 +32,7 @@ describe('NotificationsService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: UsersClientService, useValue: usersClient },
         { provide: EmailService, useValue: emailService },
+        { provide: PushService, useValue: pushService },
       ],
     }).compile();
 
@@ -64,6 +68,18 @@ describe('NotificationsService', () => {
         }),
       }),
     );
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    // Sin `pushBody` explícito, cae al subject (ver NotificationsService.notify).
+    expect(pushService.sendToUser).toHaveBeenCalledWith('user-1', 'Tu boleto está listo', 'Tu boleto está listo');
+  });
+
+  it('si el push falla (ej. token vencido), NO bloquea el email ni la idempotencia', async () => {
+    prisma.processedEvent.findUnique.mockResolvedValue(null);
+    pushService.sendToUser.mockRejectedValue(new Error('messaging/registration-token-not-registered'));
+
+    await service.notify('ev-push-fail', 'order.paid', 'user-1', 'asunto', 'cuerpo');
+
+    expect(emailService.send).toHaveBeenCalled();
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
   });
 
