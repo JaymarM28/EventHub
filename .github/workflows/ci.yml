@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  # prisma generate no se conecta a una base real, pero el CLI exige que
+  # DATABASE_URL exista en el entorno (lee el schema con env("DATABASE_URL")).
+  DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
+
+jobs:
+  backend:
+    name: backend (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - access-service
+          - api-gateway
+          - auth-service
+          - events-service
+          - notifications-service
+          - orders-service
+          - tickets-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: prisma generate
+        if: hashFiles(format('apps/{0}/prisma/schema.prisma', matrix.service)) != ''
+        run: pnpm --filter "@event-hub/${{ matrix.service }}" run prisma:generate
+
+      - name: typecheck
+        run: pnpm --filter "@event-hub/${{ matrix.service }}" exec tsc --noEmit
+
+      - name: lint
+        run: pnpm --filter "@event-hub/${{ matrix.service }}" run lint
+
+      - name: test
+        run: pnpm --filter "@event-hub/${{ matrix.service }}" run test
+
+  web:
+    name: web (Next.js)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: lint
+        run: pnpm --filter "@event-hub/web" run lint
+
+      - name: typecheck
+        run: pnpm --filter "@event-hub/web" exec tsc --noEmit
+
+      - name: build
+        run: pnpm --filter "@event-hub/web" run build
+
+  admin-panel:
+    name: admin-panel (Vite)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: lint
+        run: pnpm --filter "@event-hub/admin-panel" run lint
+
+      - name: build
+        # build ya corre `tsc -b` antes de `vite build` (ver package.json).
+        run: pnpm --filter "@event-hub/admin-panel" run build
