@@ -90,14 +90,8 @@ class ProfileScreen extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(height: 32),
-            _ProfileTile(
-              icon: Icons.confirmation_number_outlined,
-              label: 'Mis boletos',
-              onTap: () => context.push('/tickets'),
-            ),
             if (authState.canScan) ...[
-              const SizedBox(height: 10),
+              const SizedBox(height: 32),
               _ProfileTile(
                 icon: Icons.qr_code_scanner_rounded,
                 label: 'Escanear boletos',

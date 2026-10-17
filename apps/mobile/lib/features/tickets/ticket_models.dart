@@ -9,6 +9,7 @@ class TicketModel {
     required this.zoneName,
     required this.zonePrice,
     required this.assignedToName,
+    this.refundedAt,
   });
 
   final String id;
@@ -16,6 +17,11 @@ class TicketModel {
   final String orderId;
   final String qrToken;
   final DateTime? scannedAt;
+
+  /// #22 — no-null significa que la orden de este boleto fue reembolsada
+  /// (ver TicketsService.refundByOrder) — el boleto queda inválido para
+  /// escanear en la puerta, y acá se muestra distinto del resto.
+  final DateTime? refundedAt;
 
   /// Enriquecido por tickets-service desde su copia local de EventZone
   /// (ver TicketsService.findByUser) — null solo si la zona nunca se
@@ -44,7 +50,28 @@ class TicketModel {
           ? null
           : double.parse(json['zonePrice'].toString()),
       assignedToName: json['assignedToName'] as String?,
+      refundedAt: json['refundedAt'] == null
+          ? null
+          : DateTime.parse(json['refundedAt'] as String),
     );
+  }
+
+  /// Boleto sin internet (2026-09-29) — round-trip local con
+  /// `shared_preferences` (ver TicketsCache), no algo que el backend
+  /// consuma de vuelta.
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'zoneId': zoneId,
+      'orderId': orderId,
+      'qrToken': qrToken,
+      'scannedAt': scannedAt?.toIso8601String(),
+      'eventId': eventId,
+      'zoneName': zoneName,
+      'zonePrice': zonePrice,
+      'assignedToName': assignedToName,
+      'refundedAt': refundedAt?.toIso8601String(),
+    };
   }
 
   TicketModel copyWith({String? assignedToName}) {
@@ -58,6 +85,7 @@ class TicketModel {
       zoneName: zoneName,
       zonePrice: zonePrice,
       assignedToName: assignedToName ?? this.assignedToName,
+      refundedAt: refundedAt,
     );
   }
 }

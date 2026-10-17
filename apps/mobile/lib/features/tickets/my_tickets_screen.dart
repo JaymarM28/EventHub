@@ -1,6 +1,10 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../events/event_models.dart';
@@ -8,6 +12,20 @@ import '../events/events_repository.dart';
 import 'ticket_models.dart';
 import 'ticket_screen.dart';
 import 'tickets_repository.dart';
+
+/// Boleto sin internet (2026-09-29, pedido del usuario): la puerta de un
+/// evento es exactamente donde peor señal hay — el punto más crítico para
+/// depender de la red. `_load()` guarda la última carga exitosa acá, y
+/// cae a ella si la red falla, en vez de mostrar la pantalla de error.
+const _ticketsCacheKey = 'cached_my_tickets_v1';
+
+/// Pedido del usuario (2026-09-29): un boleto no debería poder "mostrarse"
+/// apenas se compra — recién se habilita 6 horas antes del evento (mismo
+/// criterio que usan las aerolíneas con el pase de abordar). Es una
+/// restricción de presentación nada más: el `qrToken` es el mismo de
+/// siempre y sigue siendo válido para access-service en cualquier momento
+/// — acá solo se decide si la app se lo MUESTRA al comprador.
+const _ticketAvailabilityWindow = Duration(hours: 6);
 
 /// Todos los boletos de UNA orden (Fase A puede ser más de uno) — al
 /// tocarla se abre el mismo TicketScreen con PageView que ya usa el flujo
@@ -41,6 +59,7 @@ class MyTicketsScreen extends StatefulWidget {
 
 class _MyTicketsScreenState extends State<MyTicketsScreen> {
   late Future<List<_EventGroup>> _future;
+  bool _fromCache = false;
 
   @override
   void initState() {
@@ -54,6 +73,22 @@ class _MyTicketsScreenState extends State<MyTicketsScreen> {
   }
 
   Future<List<_EventGroup>> _load() async {
+    try {
+      final groups = await _loadFromNetwork();
+      _fromCache = false;
+      unawaited(_saveToCache(groups));
+      return groups;
+    } catch (err) {
+      final cached = await _loadFromCache();
+      if (cached != null) {
+        _fromCache = true;
+        return cached;
+      }
+      rethrow; // sin red Y sin caché — recién ahí se muestra el error real.
+    }
+  }
+
+  Future<List<_EventGroup>> _loadFromNetwork() async {
     final ticketsRepository = context.read<TicketsRepository>();
     final eventsRepository = context.read<EventsRepository>();
 
@@ -108,6 +143,58 @@ class _MyTicketsScreenState extends State<MyTicketsScreen> {
         .toList();
   }
 
+  Future<void> _saveToCache(List<_EventGroup> groups) async {
+    final prefs = await SharedPreferences.getInstance();
+    final encoded = jsonEncode(
+      groups
+          .map(
+            (g) => {
+              'event': g.event.toJson(),
+              'purchases': g.purchases
+                  .map(
+                    (p) => {
+                      'zone': p.zone.toJson(),
+                      'tickets': p.tickets.map((t) => t.toJson()).toList(),
+                    },
+                  )
+                  .toList(),
+            },
+          )
+          .toList(),
+    );
+    await prefs.setString(_ticketsCacheKey, encoded);
+  }
+
+  Future<List<_EventGroup>?> _loadFromCache() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_ticketsCacheKey);
+    if (raw == null) return null;
+    try {
+      final decoded = jsonDecode(raw) as List<dynamic>;
+      return decoded.map((g) {
+        final map = g as Map<String, dynamic>;
+        return _EventGroup(
+          event: EventModel.fromJson(map['event'] as Map<String, dynamic>),
+          purchases: (map['purchases'] as List<dynamic>).map((p) {
+            final purchaseMap = p as Map<String, dynamic>;
+            return _Purchase(
+              zone: ZoneModel.fromJson(
+                purchaseMap['zone'] as Map<String, dynamic>,
+              ),
+              tickets: (purchaseMap['tickets'] as List<dynamic>)
+                  .map((t) => TicketModel.fromJson(t as Map<String, dynamic>))
+                  .toList(),
+            );
+          }).toList(),
+        );
+      }).toList();
+    } catch (_) {
+      // Caché corrupto/de un formato viejo — mismo criterio que "no hay
+      // caché": seguir con el error real en vez de crashear mostrando basura.
+      return null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
@@ -154,17 +241,42 @@ class _MyTicketsScreenState extends State<MyTicketsScreen> {
                     (a, b) => b.event.startsAt.compareTo(a.event.startsAt),
                   );
 
-            return TabBarView(
+            return Column(
               children: [
-                _TicketsList(
-                  groups: active,
-                  onRefresh: _refresh,
-                  emptyMessage: 'No tenés boletos de próximos eventos',
-                ),
-                _TicketsList(
-                  groups: past,
-                  onRefresh: _refresh,
-                  emptyMessage: 'Todavía no tenés boletos de eventos pasados',
+                if (_fromCache)
+                  Container(
+                    width: double.infinity,
+                    color: AppColors.accentSoft,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    child: const Text(
+                      'Sin conexión — mostrando tus boletos guardados',
+                      style: TextStyle(
+                        color: AppColors.accent,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                Expanded(
+                  child: TabBarView(
+                    children: [
+                      _TicketsList(
+                        groups: active,
+                        onRefresh: _refresh,
+                        emptyMessage: 'No tenés boletos de próximos eventos',
+                      ),
+                      _TicketsList(
+                        groups: past,
+                        onRefresh: _refresh,
+                        emptyMessage:
+                            'Todavía no tenés boletos de eventos pasados',
+                      ),
+                    ],
+                  ),
                 ),
               ],
             );
@@ -275,17 +387,36 @@ class _PurchaseRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final count = purchase.tickets.length;
     final allUsed = purchase.tickets.every((t) => t.scannedAt != null);
+    // #22 — una orden se reembolsa entera (sin parcial, ver
+    // OrdersService.refund), así que "alguno" y "todos" dan lo mismo acá;
+    // se usa `any` porque es la señal que más le importa al comprador
+    // (no necesita que la escaneen para dejar de servir).
+    final refunded = purchase.tickets.any((t) => t.refundedAt != null);
+    // Pedido del usuario (2026-09-29): el boleto se "habilita" recién 6h
+    // antes del evento — es solo de presentación, ver el comentario en
+    // `_ticketAvailabilityWindow` arriba.
+    final availableAt = event.startsAt.subtract(_ticketAvailabilityWindow);
+    final isAvailable = !DateTime.now().isBefore(availableAt);
 
     return GestureDetector(
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => TicketScreen(
-            tickets: purchase.tickets,
-            event: event,
-            zone: purchase.zone,
+      onTap: () {
+        if (!isAvailable) {
+          final timeLabel = DateFormat('d MMM, HH:mm', 'es').format(availableAt);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Tu boleto se habilita el $timeLabel')),
+          );
+          return;
+        }
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => TicketScreen(
+              tickets: purchase.tickets,
+              event: event,
+              zone: purchase.zone,
+            ),
           ),
-        ),
-      ),
+        );
+      },
       child: Container(
         margin: const EdgeInsets.only(top: 8),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -293,46 +424,82 @@ class _PurchaseRow extends StatelessWidget {
           color: AppColors.background,
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppColors.accentSoft,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                purchase.zone.name,
-                style: const TextStyle(
-                  color: AppColors.accent,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 12,
+        child: Opacity(
+          opacity: isAvailable ? 1 : 0.5,
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.accentSoft,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  purchase.zone.name,
+                  style: const TextStyle(
+                    color: AppColors.accent,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                  ),
                 ),
               ),
-            ),
-            if (count > 1) ...[
-              const SizedBox(width: 8),
-              Text(
-                '× $count',
-                style: Theme.of(context).textTheme.bodyMedium
-                    ?.copyWith(fontWeight: FontWeight.w600),
+              if (count > 1) ...[
+                const SizedBox(width: 8),
+                Text(
+                  '× $count',
+                  style: Theme.of(context).textTheme.bodyMedium
+                      ?.copyWith(fontWeight: FontWeight.w600),
+                ),
+              ],
+              const Spacer(),
+              if (!isAvailable)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.lock_outline_rounded,
+                        size: 14,
+                        color: AppColors.inkSoft,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Disponible ${DateFormat('d MMM, HH:mm', 'es').format(availableAt)}',
+                        style: const TextStyle(
+                          color: AppColors.inkSoft,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else if (refunded)
+                const Padding(
+                  padding: EdgeInsets.only(right: 8),
+                  child: Text(
+                    'Reembolsado',
+                    style: TextStyle(
+                      color: AppColors.error,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                    ),
+                  ),
+                )
+              else if (allUsed)
+                const Padding(
+                  padding: EdgeInsets.only(right: 8),
+                  child: Text(
+                    'Usado',
+                    style: TextStyle(color: AppColors.inkSoft, fontSize: 12),
+                  ),
+                ),
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: AppColors.inkSoft,
+                size: 20,
               ),
             ],
-            const Spacer(),
-            if (allUsed)
-              const Padding(
-                padding: EdgeInsets.only(right: 8),
-                child: Text(
-                  'Usado',
-                  style: TextStyle(color: AppColors.inkSoft, fontSize: 12),
-                ),
-              ),
-            const Icon(
-              Icons.chevron_right_rounded,
-              color: AppColors.inkSoft,
-              size: 20,
-            ),
-          ],
+          ),
         ),
       ),
     );

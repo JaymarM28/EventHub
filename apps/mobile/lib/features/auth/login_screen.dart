@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/auth_state.dart';
+import '../../core/nav_return.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/pressable_button.dart';
 import 'auth_repository.dart';
@@ -39,7 +40,10 @@ class _LoginScreenState extends State<LoginScreen> {
         _emailController.text.trim(),
         _passwordController.text,
       );
-      if (mounted) context.go('/events');
+      if (mounted) {
+        final from = currentFromParam(context);
+        context.go(from != null && from.isNotEmpty ? from : '/events');
+      }
     } on AuthException catch (e) {
       setState(() => _error = e.message);
     } finally {
@@ -131,7 +135,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: const Text('¿Olvidaste tu contraseña?'),
                 ),
                 TextButton(
-                  onPressed: () => context.go('/register'),
+                  onPressed: () => context.go(
+                    withFromParam('/register', currentFromParam(context)),
+                  ),
                   child: const Text('¿No tienes cuenta? Regístrate'),
                 ),
               ],
