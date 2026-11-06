@@ -547,7 +547,7 @@ butacas puntuales con reembolsos todavía, así que no es urgente.
 
 ---
 
-## 16. Monitoreo de errores en producción (Sentry o similar)
+## 16. ~~Monitoreo de errores en producción (Sentry o similar)~~ — RESUELTO (2026-11-05)
 
 **What:** Hoy no hay forma de enterarse de una excepción no controlada en
 producción (por ejemplo, en el flujo de pago de `orders-service` o en la
@@ -566,3 +566,16 @@ alcanza para este tamaño de proyecto.
 **Depends on:** Nada bloqueante — se puede hacer en cualquier momento, pero
 cobra más urgencia una vez que Wompi pase de sandbox a producción (Fase 4
 del `DEPLOYMENT_PLAN.md`), porque ahí empieza a haber dinero real en juego.
+
+**Resuelto:** `@sentry/nestjs` en los 7 servicios (no solo los críticos —
+el costo marginal de cubrir los 7 era bajo). Cada uno tiene su
+`src/instrument.ts` (el PRIMER import de `main.ts`, antes de cualquier
+otro módulo — requisito de la auto-instrumentación de Sentry) y
+`SentryModule.forRoot()` + `SentryGlobalFilter` (vía `APP_FILTER`,
+registrado primero) en su `app.module.ts`. Los 7 comparten UN mismo DSN
+(`SENTRY_DSN`, un solo proyecto de Sentry) y se distinguen por el tag
+`service` en cada `instrument.ts`. Sin `SENTRY_DSN` seteado (desarrollo
+local), el SDK queda en no-op — verificado arrancando orders-service así
+y confirmando el log `SentryModule dependencies initialized` sin romper
+nada. Falta: crear la cuenta/proyecto real en sentry.io y pegar el DSN en
+el `.env` de producción — eso es acción del usuario, no de código.

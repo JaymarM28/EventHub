@@ -1,13 +1,17 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_GUARD, Reflector } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, Reflector } from '@nestjs/core';
+import { SentryGlobalFilter, SentryModule } from '@sentry/nestjs/setup';
 import { InternalAuthGuard } from '@event-hub/internal-auth';
 import { PrismaModule } from './prisma/prisma.module';
 import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, NotificationsModule],
+  // SentryModule.forRoot() va PRIMERO (ver docs de @sentry/nestjs).
+  imports: [SentryModule.forRoot(), ConfigModule.forRoot({ isGlobal: true }), PrismaModule, NotificationsModule],
   providers: [
+    // Monitoreo de errores (TODOS.md #16) — DEBE ser el primer APP_FILTER.
+    { provide: APP_FILTER, useClass: SentryGlobalFilter },
     {
       provide: APP_GUARD,
       useFactory: (reflector: Reflector) =>

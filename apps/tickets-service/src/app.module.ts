@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_GUARD, Reflector } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, Reflector } from '@nestjs/core';
+import { SentryGlobalFilter, SentryModule } from '@sentry/nestjs/setup';
 import { InternalAuthGuard, RolesGuard } from '@event-hub/internal-auth';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
@@ -12,6 +13,8 @@ import { WaitlistModule } from './waitlist/waitlist.module';
 
 @Module({
   imports: [
+    // SentryModule.forRoot() va PRIMERO (ver docs de @sentry/nestjs).
+    SentryModule.forRoot(),
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
     RedisModule,
@@ -22,6 +25,8 @@ import { WaitlistModule } from './waitlist/waitlist.module';
     WaitlistModule,
   ],
   providers: [
+    // Monitoreo de errores (TODOS.md #16) — DEBE ser el primer APP_FILTER.
+    { provide: APP_FILTER, useClass: SentryGlobalFilter },
     {
       provide: APP_GUARD,
       useFactory: (reflector: Reflector) =>

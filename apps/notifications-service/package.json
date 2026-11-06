@@ -25,6 +25,7 @@
     "@nestjs/microservices": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",
     "@prisma/client": "^6.2.0",
+    "@sentry/nestjs": "^11.10.0",
     "amqplib": "^0.10.4",
     "axios": "^1.7.9",
     "class-transformer": "^0.5.1",

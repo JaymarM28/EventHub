@@ -1,7 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
-import { APP_GUARD, Reflector } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, Reflector } from '@nestjs/core';
+import { SentryGlobalFilter, SentryModule } from '@sentry/nestjs/setup';
 import { InternalAuthGuard, RolesGuard } from '@event-hub/internal-auth';
 import { PrismaModule } from './prisma/prisma.module';
 import { MessagingModule } from './messaging/messaging.module';
@@ -10,6 +11,10 @@ import { OrdersModule } from './orders/orders.module';
 
 @Module({
   imports: [
+    // Monitoreo de errores (TODOS.md #16) — DEBE ser el primer import del
+    // array (ver docs de @sentry/nestjs): registra internamente el
+    // interceptor que captura excepciones antes de que lleguen a los demás.
+    SentryModule.forRoot(),
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
     PrismaModule,
@@ -18,6 +23,9 @@ import { OrdersModule } from './orders/orders.module';
     OrdersModule,
   ],
   providers: [
+    // Reenvía al handler de excepciones default de Nest después de
+    // reportar a Sentry — DEBE ser el primer APP_FILTER (ver docs).
+    { provide: APP_FILTER, useClass: SentryGlobalFilter },
     {
       provide: APP_GUARD,
       useFactory: (reflector: Reflector) =>
